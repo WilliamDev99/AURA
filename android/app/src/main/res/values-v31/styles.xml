@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+: layar pembuka sistem menampilkan ikon aplikasi di tengah.
+     Latarnya disamakan dengan biru malam AURA. Berkas ini juga dibuat untuk
+     mode gelap, karena kualifikasi "night" didahulukan Android di atas versi
+     API: tanpa values-night-v31, mode gelap akan memakai values-night biasa. -->
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">@color/aura_splash</item>
+    </style>
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@color/aura_splash</item>
+    </style>
+</resources>

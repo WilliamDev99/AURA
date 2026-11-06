@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "571673272095",
+    "firebase_url": "https://aura-933ef-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "aura-933ef",
+    "storage_bucket": "aura-933ef.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:571673272095:android:61a8587976022601a71a2a",
+        "android_client_info": {
+          "package_name": "id.aura.aura"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBQGbD-EcfEvvdz83NjD7xHt8EvbQ1fBvc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

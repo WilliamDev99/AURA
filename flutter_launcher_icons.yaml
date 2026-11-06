@@ -1,0 +1,33 @@
+# Ikon aplikasi AURA dari maskot robot bertanjak.
+#
+# Gambar sumber dibuat oleh tool/make_mascot_assets.py dari
+# design/aura_mascot_original.png. Setelah mengganti maskot, jalankan:
+#   python -I tool/make_mascot_assets.py
+#   dart run flutter_launcher_icons
+
+flutter_launcher_icons:
+  image_path: "design/app_icon.png"
+
+  android: "ic_launcher"
+  min_sdk_android: 21
+  # Ikon adaptif (Android 8+): latar dan maskot dipisah agar launcher bisa
+  # memberi bentuk lingkaran, kotak bulat, atau tetesan sesuai merek HP.
+  adaptive_icon_background: "design/app_icon_background.png"
+  adaptive_icon_foreground: "design/app_icon_foreground.png"
+  # Bawaannya 16%: alat ini menyusutkan lapisan depan dengan asumsi gambar
+  # belum menyesuaikan zona aman. Gambar kita sudah ditempatkan di zona aman
+  # oleh tool/make_mascot_assets.py, jadi tanpa ini maskot menyusut dua kali.
+  adaptive_icon_foreground_inset: 0
+
+  ios: false
+
+  web:
+    generate: true
+    image_path: "design/app_icon.png"
+    background_color: "#0B125C"
+    theme_color: "#2A5CEB"
+
+  windows:
+    generate: true
+    image_path: "design/app_icon.png"
+    icon_size: 256

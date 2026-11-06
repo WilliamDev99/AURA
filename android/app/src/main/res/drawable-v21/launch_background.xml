@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Latar sebelum Flutter menggambar frame pertama (Android 11 ke bawah).
+     Logo sengaja tidak dipasang sebagai <bitmap> di sini: di Android 8+
+     @mipmap/ic_launcher adalah XML ikon adaptif, bukan gambar, dan merujuknya
+     dari <bitmap> membuat aplikasi crash saat dibuka. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/aura_splash" />
+</layer-list>

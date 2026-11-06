@@ -1,0 +1,30 @@
+rules_version = '2';
+
+// Lampiran bukti (tangkapan layar atau berkas yang dilaporkan anak).
+//
+// Sama seperti Firestore: sekali diunggah, berkas tidak bisa ditimpa atau
+// dihapus dari klien. Nilai hash berkas sudah tercatat di rantai bukti, jadi
+// penggantian berkas akan membuat verifikasi gagal.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function myFamily() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.familyId;
+    }
+
+    match /families/{familyId}/evidence/{fileName} {
+      allow read: if signedIn() && myFamily() == familyId;
+
+      allow create: if signedIn() && myFamily() == familyId
+        && request.resource.size < 25 * 1024 * 1024
+        && (request.resource.contentType.matches('image/.*')
+            || request.resource.contentType.matches('audio/.*')
+            || request.resource.contentType == 'application/pdf');
+
+      allow update, delete: if false;
+    }
+  }
+}

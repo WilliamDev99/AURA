@@ -1,0 +1,119 @@
+rules_version = '2';
+
+// Aturan akses AURA.
+//
+// Prinsip yang ditegakkan di sini:
+// 1. Bukti bersifat sekali tulis. Tidak ada klien yang boleh mengubah atau
+//    menghapusnya, termasuk orang tua. Inilah yang membuat rantai integritas
+//    punya arti saat berkas dibawa ke penyidik.
+// 2. Ruang curhat anak dengan AI Guardian tidak bisa dibaca orang tua.
+//    Yang sampai ke orang tua hanyalah peringatan saat ada bahaya. Tanpa batas
+//    ini, anak berhenti bercerita dan aplikasi kehilangan fungsinya.
+// 3. Perangkat anak hanya boleh menulis peringatan, tidak boleh menutupnya.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function myFamily() {
+      return me().familyId;
+    }
+
+    function isParent() {
+      return signedIn() && me().role == 'parent';
+    }
+
+    function inFamily(familyId) {
+      return signedIn() && myFamily() == familyId;
+    }
+
+    // Field yang berubah dalam sebuah update.
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    match /users/{userId} {
+      // Anggota keluarga boleh saling melihat profil dasar.
+      allow read: if signedIn() &&
+        (request.auth.uid == userId ||
+         (resource.data.familyId != null && resource.data.familyId == myFamily()));
+
+      allow create: if signedIn() && request.auth.uid == userId;
+
+      // Pemilik akun boleh memperbarui profilnya, tetapi tidak boleh mengubah
+      // perannya sendiri (mencegah perangkat anak menjadi "orang tua").
+      allow update: if signedIn() && request.auth.uid == userId &&
+        request.resource.data.role == resource.data.role;
+
+      // Orang tua boleh menjeda atau menyalakan perlindungan anaknya.
+      allow update: if isParent() &&
+        resource.data.familyId == myFamily() &&
+        resource.data.role == 'child' &&
+        changed().hasOnly(['protectionActive']);
+
+      allow delete: if false;
+    }
+
+    match /families/{familyId} {
+      allow read: if signedIn() &&
+        (request.auth.uid in resource.data.memberIds ||
+         resource.data.pairingCode == request.resource.data.pairingCode);
+
+      allow create: if isParent() &&
+        request.resource.data.ownerId == request.auth.uid;
+
+      // Bergabung lewat kode: hanya boleh menambahkan diri sendiri.
+      allow update: if signedIn() &&
+        changed().hasOnly(['memberIds']) &&
+        request.resource.data.memberIds.hasAll(resource.data.memberIds) &&
+        request.resource.data.memberIds.removeAll(resource.data.memberIds) == [request.auth.uid];
+
+      // Pemilik boleh memutar ulang kode penautan.
+      allow update: if isParent() && resource.data.ownerId == request.auth.uid &&
+        changed().hasOnly(['pairingCode', 'pairingExpiresAt', 'name']);
+
+      allow delete: if false;
+
+      match /alerts/{alertId} {
+        allow read: if inFamily(familyId);
+
+        // Perangkat anak maupun Cloud Function boleh memunculkan peringatan.
+        allow create: if inFamily(familyId) &&
+          request.resource.data.familyId == familyId &&
+          request.resource.data.status == 'unread';
+
+        // Hanya orang tua yang boleh menutup atau mengeskalasi peringatan,
+        // dan hanya status yang boleh berubah. Isi peringatan tetap apa adanya.
+        allow update: if isParent() && inFamily(familyId) &&
+          changed().hasOnly(['status', 'statusUpdatedAt']);
+
+        allow delete: if false;
+      }
+
+      match /evidence/{evidenceId} {
+        allow read: if inFamily(familyId);
+
+        allow create: if inFamily(familyId) &&
+          request.resource.data.familyId == familyId &&
+          request.resource.data.contentHash is string &&
+          request.resource.data.chainHash is string &&
+          request.resource.data.sequence is int;
+
+        // Sekali tersimpan, bukti tidak bisa disentuh lagi dari klien.
+        allow update, delete: if false;
+      }
+
+      // Ruang pribadi anak dengan AI Guardian.
+      match /chats/{childId}/messages/{messageId} {
+        allow read, create: if signedIn() && request.auth.uid == childId;
+        allow update, delete: if false;
+      }
+    }
+  }
+}

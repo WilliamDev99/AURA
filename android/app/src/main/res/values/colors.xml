@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Biru malam AURA: sama dengan latar ikon dan layar aplikasi, supaya
+         tidak ada kilatan putih saat aplikasi dibuka. -->
+    <color name="aura_splash">#0B125C</color>
+</resources>
