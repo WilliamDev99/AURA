@@ -4,12 +4,15 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ComponentName
+import android.content.ContentProviderOperation
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.ContactsContract
 import android.provider.Settings
 import com.google.android.gms.common.api.ResolvableApiException
 import com.google.android.gms.location.CurrentLocationRequest
@@ -60,6 +63,16 @@ class MainActivity : FlutterActivity() {
                     "placeCall" -> placeCall(call.argument<String>("number"), result)
                     "hasCallPermission" -> result.success(hasCallPermission())
                     "requestCallPermission" -> requestCallPermission(result)
+                    "hasWhatsApp" -> result.success(whatsAppPackage() != null)
+                    "placeWhatsAppCall" ->
+                        placeWhatsAppCall(call.argument<String>("digits"), result)
+                    "whatsAppCallReady" ->
+                        whatsAppCallReady(call.argument<String>("digits"), result)
+                    "saveParentContact" -> saveParentContact(
+                        number = call.argument<String>("number"),
+                        name = call.argument<String>("name"),
+                        result = result,
+                    )
                     "ensureLocationOn" -> ensureLocationOn(result)
                     "openNotificationAccessSettings" -> {
                         openNotificationAccessSettings()
@@ -182,18 +195,254 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /**
+     * Meminta izin telepon, sekaligus izin Kontak bila WhatsApp terpasang.
+     *
+     * Kontak hanya dipakai untuk nomor orang tua: menyimpannya supaya
+     * WhatsApp mengenalinya, lalu menemukannya saat anak menekan "Telepon
+     * lewat WhatsApp". Tanpa WhatsApp, izin itu tidak berguna, jadi tidak
+     * diminta. Baca dan tulis Kontak satu kelompok izin: satu dialog saja.
+     */
     private fun requestCallPermission(result: MethodChannel.Result) {
-        if (hasCallPermission()) {
-            result.success(true)
+        val missing = buildList {
+            if (!hasCallPermission()) add(Manifest.permission.CALL_PHONE)
+            if (whatsAppPackage() != null) {
+                if (!hasContactsPermission()) add(Manifest.permission.READ_CONTACTS)
+                if (!hasWriteContactsPermission()) {
+                    add(Manifest.permission.WRITE_CONTACTS)
+                }
+            }
+        }
+        if (missing.isEmpty()) {
+            result.success(hasCallPermission())
             return
         }
         // Permintaan sebelumnya yang belum dijawab dianggap ditolak.
         pendingCallPermission?.success(false)
         pendingCallPermission = result
-        requestPermissions(
-            arrayOf(Manifest.permission.CALL_PHONE),
-            CALL_PERMISSION_REQUEST,
+        requestPermissions(missing.toTypedArray(), CALL_PERMISSION_REQUEST)
+    }
+
+    private fun hasContactsPermission() =
+        checkSelfPermission(Manifest.permission.READ_CONTACTS) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun hasWriteContactsPermission() =
+        checkSelfPermission(Manifest.permission.WRITE_CONTACTS) ==
+            PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Apakah "Telepon lewat WhatsApp" akan langsung menelepon: WhatsApp sudah
+     * menambahkan baris panggilan suara untuk nomor orang tua di Kontak.
+     */
+    private fun whatsAppCallReady(digits: String?, result: MethodChannel.Result) {
+        val packageName = whatsAppPackage()
+        if (digits.isNullOrBlank() || packageName == null) {
+            result.success(false)
+            return
+        }
+        Thread {
+            val ready = findWhatsAppCallRow(packageName, digits) != null
+            runOnUiThread { result.success(ready) }
+        }.start()
+    }
+
+    /**
+     * Menyimpan nomor orang tua di Kontak bila belum ada.
+     *
+     * WhatsApp hanya bisa langsung menelepon nomor yang ada di Kontak. Tanpa
+     * ini, tombol WhatsApp saat SOS baru membuka chat dan anak masih harus
+     * menekan ikon telepon. Kontak yang sudah ada tidak pernah diubah.
+     *
+     * Jawaban: "exists", "added", "no_permission", "not_installed",
+     * "no_number", atau "failed".
+     */
+    private fun saveParentContact(
+        number: String?,
+        name: String?,
+        result: MethodChannel.Result,
+    ) {
+        if (number.isNullOrBlank()) {
+            result.success("no_number")
+            return
+        }
+        if (whatsAppPackage() == null) {
+            result.success("not_installed")
+            return
+        }
+        if (!hasContactsPermission() || !hasWriteContactsPermission()) {
+            result.success("no_permission")
+            return
+        }
+        Thread {
+            val reply = try {
+                if (hasContactWithNumber(number)) {
+                    "exists"
+                } else {
+                    insertContact(name?.takeIf { it.isNotBlank() } ?: "AURA", number)
+                    "added"
+                }
+            } catch (_: Exception) {
+                "failed"
+            }
+            runOnUiThread { result.success(reply) }
+        }.start()
+    }
+
+    /** Pencarian bawaan Android, yang sudah menyamakan 0812... dan +62812... */
+    private fun hasContactWithNumber(number: String): Boolean {
+        val uri = Uri.withAppendedPath(
+            ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+            Uri.encode(number),
         )
+        contentResolver.query(
+            uri,
+            arrayOf(ContactsContract.PhoneLookup._ID),
+            null,
+            null,
+            null,
+        )?.use { return it.moveToFirst() }
+        return false
+    }
+
+    /** Kontak lokal di perangkat, tidak masuk akun Google mana pun. */
+    private fun insertContact(name: String, number: String) {
+        val operations = arrayListOf(
+            ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI)
+                .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, null)
+                .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, null)
+                .build(),
+            ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                .withValue(
+                    ContactsContract.Data.MIMETYPE,
+                    ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE,
+                )
+                .withValue(
+                    ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME,
+                    name,
+                )
+                .build(),
+            ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                .withValue(
+                    ContactsContract.Data.MIMETYPE,
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE,
+                )
+                .withValue(ContactsContract.CommonDataKinds.Phone.NUMBER, number)
+                .withValue(
+                    ContactsContract.CommonDataKinds.Phone.TYPE,
+                    ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE,
+                )
+                .build(),
+        )
+        contentResolver.applyBatch(ContactsContract.AUTHORITY, operations)
+    }
+
+    /** WhatsApp biasa didahulukan; WhatsApp Business bila hanya itu yang ada. */
+    private fun whatsAppPackage(): String? =
+        WhatsAppContact.callMimeTypes.keys.firstOrNull { isInstalled(it) }
+
+    private fun isInstalled(packageName: String) = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getPackageInfo(
+                packageName,
+                PackageManager.PackageInfoFlags.of(0),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, 0)
+        }
+        true
+    } catch (_: PackageManager.NameNotFoundException) {
+        false
+    }
+
+    /**
+     * Menelepon orang tua lewat WhatsApp, untuk HP tanpa pulsa atau tablet
+     * tanpa SIM. Butuh internet.
+     *
+     * Bila nomor orang tua tersimpan di Kontak, panggilan suara langsung
+     * dimulai ("called"). Bila tidak, atau izin Kontak tidak ada, chat
+     * WhatsApp orang tua dibuka ("chat_opened") dan anak tinggal menekan ikon
+     * telepon di sana.
+     *
+     * Pencarian kontak berjalan di luar thread utama: jalur darurat tidak
+     * boleh membuat layar membeku.
+     */
+    private fun placeWhatsAppCall(digits: String?, result: MethodChannel.Result) {
+        if (digits.isNullOrBlank()) {
+            result.success("no_number")
+            return
+        }
+        val packageName = whatsAppPackage()
+        if (packageName == null) {
+            result.success("not_installed")
+            return
+        }
+        Thread {
+            val row = findWhatsAppCallRow(packageName, digits)
+            runOnUiThread {
+                if (row != null) {
+                    try {
+                        startActivity(
+                            Intent(Intent.ACTION_VIEW)
+                                .setDataAndType(
+                                    ContentUris.withAppendedId(
+                                        ContactsContract.Data.CONTENT_URI,
+                                        row,
+                                    ),
+                                    WhatsAppContact.callMimeTypes.getValue(packageName),
+                                )
+                                .setPackage(packageName)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                        result.success("called")
+                        return@runOnUiThread
+                    } catch (_: Exception) {
+                        // WhatsApp menolak baris itu; buka chat-nya saja.
+                    }
+                }
+                try {
+                    startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits"))
+                            .setPackage(packageName)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                    result.success("chat_opened")
+                } catch (_: Exception) {
+                    result.success("failed")
+                }
+            }
+        }.start()
+    }
+
+    /** ID baris "Panggilan suara" WhatsApp milik [digits], atau null. */
+    private fun findWhatsAppCallRow(packageName: String, digits: String): Long? {
+        if (!hasContactsPermission()) return null
+        val mimeType = WhatsAppContact.callMimeTypes[packageName] ?: return null
+        return try {
+            contentResolver.query(
+                ContactsContract.Data.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.Data._ID,
+                    ContactsContract.Data.DATA1,
+                    ContactsContract.Data.DATA3,
+                ),
+                "${ContactsContract.Data.MIMETYPE} = ?",
+                arrayOf(mimeType),
+                null,
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    if (WhatsAppContact.matches(cursor.getString(1), cursor.getString(2), digits)) {
+                        return cursor.getLong(0)
+                    }
+                }
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /**
@@ -250,8 +499,8 @@ class MainActivity : FlutterActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != CALL_PERMISSION_REQUEST) return
-        val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
-        pendingCallPermission?.success(granted)
+        // Bisa berisi izin Kontak juga; yang dilaporkan tetap izin telepon.
+        pendingCallPermission?.success(hasCallPermission())
         pendingCallPermission = null
     }
 

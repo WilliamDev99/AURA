@@ -136,6 +136,20 @@ jaringan seluler biasa
 - Lembar konfirmasi jujur: menyebut apakah peringatan, lokasi, dan telepon
   benar-benar berhasil. Anak tidak boleh mengira orang tuanya sudah tahu
   padahal belum.
+- **Telepon lewat WhatsApp.** Bila WhatsApp terpasang, lembar konfirmasi
+  punya tombol "Telepon lewat WhatsApp", untuk HP tanpa pulsa atau tablet
+  tanpa SIM selama ada internet. Telepon seluler tetap jalur utama; WhatsApp
+  hanya saat anak menekannya. WhatsApp tidak punya cara resmi untuk memulai
+  panggilan dari aplikasi lain, jadi AURA membuka baris "Panggilan suara"
+  yang WhatsApp tambahkan ke Kontak
+  ([WhatsAppContact.kt](android/app/src/main/kotlin/id/aura/aura/WhatsAppContact.kt)).
+  Baris itu hanya ada untuk nomor yang tersimpan di Kontak, jadi AURA
+  **menyimpan nomor orang tua ke Kontak** perangkat anak bila belum ada (saat
+  persetujuan dan setiap kali nomornya berganti), jauh sebelum darurat supaya
+  WhatsApp sempat mengenalinya. Izin Kontak diminta di layar persetujuan,
+  hanya bila WhatsApp terpasang. Pengaturan anak menampilkan baris "Telepon
+  WhatsApp": siap langsung menelepon, atau tombol "Siapkan". Selama belum
+  siap, tombol saat SOS membuka chat WhatsApp orang tua.
 
 ### Pemindaian chat masuk
 
@@ -439,8 +453,8 @@ minimal 1024 piksel; gambar sekarang 540 × 540.
 ## Pengujian
 
 ```bash
-flutter test          # 472 test
-cd android && ./gradlew :app:testDebugUnitTest   # 9 test Kotlin (saringan kanal, judul notifikasi)
+flutter test          # 482 test
+cd android && ./gradlew :app:testDebugUnitTest   # 13 test Kotlin (saringan kanal, judul notifikasi, kontak WhatsApp)
 cd functions && npm run build
 ```
 

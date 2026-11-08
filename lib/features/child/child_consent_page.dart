@@ -57,7 +57,10 @@ class _ChildConsentPageState extends State<ChildConsentPage> {
       tr('Menelepon orang tuamu kalau kamu menekan tombol darurat'),
       tr(
         'Supaya orang tuamu bisa langsung bicara denganmu. Tetap jalan '
-        'walau internet sedang mati.',
+        'walau internet sedang mati. Kalau ponselmu tidak punya pulsa, kamu '
+        'juga bisa menelepon lewat WhatsApp; untuk itu AURA menyimpan nomor '
+        'orang tuamu di Kontak kalau belum ada. Kontak lain tidak diubah, '
+        'dibaca, atau dikirim ke mana pun.',
       ),
     ),
   ];
@@ -106,6 +109,9 @@ class _ChildConsentPageState extends State<ChildConsentPage> {
     // dialog sistem muncul di tengah keadaan panik dan menunda pertolongan.
     await state.locationService.requestPermission();
     await state.callService.requestPermission();
+    // Disimpan sekarang, bukan saat darurat: WhatsApp butuh waktu untuk
+    // mengenali kontak baru sebelum bisa langsung meneleponnya.
+    await state.saveParentContactForWhatsApp();
 
     // Akses notifikasi tidak punya dialog izin; harus dinyalakan sendiri di
     // Pengaturan Android. Tanpanya pesan masuk tidak terpindai, jadi anak

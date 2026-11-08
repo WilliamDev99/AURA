@@ -41,6 +41,11 @@ String? normalizeIndonesianPhone(String input) {
   return '+62$national';
 }
 
+/// Bentuk nomor yang dipakai WhatsApp: hanya angka dengan kode negara tanpa
+/// `+`, mis. `6281234567890`. Null bila bukan nomor HP Indonesia.
+String? whatsAppDigits(String number) =>
+    normalizeIndonesianPhone(number)?.substring(1);
+
 /// Tampilan ramah untuk dibaca manusia: `+62 812-3456-7890`.
 String formatIndonesianPhone(String normalized) {
   if (!normalized.startsWith('+62')) return normalized;

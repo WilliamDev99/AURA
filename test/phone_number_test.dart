@@ -40,6 +40,13 @@ void main() {
     expect(formatIndonesianPhone('+6281234567890'), '+62 812-3456-7890');
   });
 
+  test('nomor WhatsApp: angka saja, berawalan 62', () {
+    expect(whatsAppDigits('+6281234567890'), '6281234567890');
+    expect(whatsAppDigits('0812-3456-7890'), '6281234567890');
+    // Nomor yang tidak masuk akal tidak boleh ditelepon lewat WhatsApp juga.
+    expect(whatsAppDigits('12345'), isNull);
+  });
+
   testWidgets('kolom nomor HP menolak huruf saat diketik', (tester) async {
     final controller = TextEditingController();
     addTearDown(controller.dispose);

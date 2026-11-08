@@ -267,6 +267,43 @@ class AppState extends ChangeNotifier {
       .call(_emergencyNumber)
       .timeout(const Duration(seconds: 6), onTimeout: () => CallOutcome.failed);
 
+  /// Menelepon orang tua lewat WhatsApp, dengan batas waktu yang sama.
+  Future<WhatsAppCallOutcome> callParentViaWhatsApp() => callService
+      .callViaWhatsApp(_emergencyNumber)
+      .timeout(
+        const Duration(seconds: 6),
+        onTimeout: () => WhatsAppCallOutcome.failed,
+      );
+
+  /// Apakah tombol "Telepon lewat WhatsApp" layak ditampilkan.
+  Future<bool> canCallParentViaWhatsApp() async {
+    if (_emergencyNumber == null) return false;
+    return callService.hasWhatsApp().timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => false,
+    );
+  }
+
+  /// Menyimpan nomor orang tua di Kontak perangkat anak bila belum ada,
+  /// supaya "Telepon lewat WhatsApp" langsung menelepon tanpa anak harus
+  /// menekan ikon telepon di chat. Tanpa izin Kontak, tidak terjadi apa-apa.
+  Future<bool> saveParentContactForWhatsApp() async {
+    final number = _emergencyNumber;
+    if (number == null || !isChild) return false;
+    return callService.saveParentContact(number, name: tr('Orang Tua (AURA)'));
+  }
+
+  /// Untuk baris status di Pengaturan anak.
+  Future<WhatsAppCallStatus> whatsAppCallStatus() async {
+    final number = _emergencyNumber;
+    if (number == null || !await callService.hasWhatsApp()) {
+      return WhatsAppCallStatus.unavailable;
+    }
+    return await callService.whatsAppCallReady(number)
+        ? WhatsAppCallStatus.ready
+        : WhatsAppCallStatus.needsSetup;
+  }
+
   Future<void> _loadCachedEmergencyNumber() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -286,10 +323,14 @@ class AppState extends ChangeNotifier {
     try {
       final number = await repository.emergencyNumber();
       if (number == null) return;
+      final changed = number != _emergencyNumber;
       _emergencyNumber = number;
       notifyListeners();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_emergencyNumberKey, number);
+      // Nomor baru (atau pertama kali tertaut): simpan di Kontak supaya
+      // WhatsApp sempat menyinkronkannya jauh sebelum keadaan darurat.
+      if (changed) await saveParentContactForWhatsApp();
     } catch (error) {
       debugPrint('AURA: nomor darurat belum bisa diperbarui ($error).');
     }

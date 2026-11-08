@@ -46,10 +46,14 @@ class _FakeLocation extends LocationService {
 
 /// Telepon tiruan: mencatat nomor yang ditelepon, tanpa benar-benar menelepon.
 class _FakeCall extends EmergencyCallService {
-  _FakeCall([this.outcome = CallOutcome.called]);
+  _FakeCall([this.outcome = CallOutcome.called, this.whatsApp]);
 
   final CallOutcome outcome;
+
+  /// Hasil panggilan WhatsApp; null berarti WhatsApp tidak terpasang.
+  final WhatsAppCallOutcome? whatsApp;
   final dialled = <String?>[];
+  final whatsAppDialled = <String?>[];
 
   @override
   Future<CallOutcome> call(String? number) async {
@@ -58,7 +62,41 @@ class _FakeCall extends EmergencyCallService {
   }
 
   @override
-  Future<bool> requestPermission() async => true;
+  Future<bool> hasWhatsApp() async => whatsApp != null;
+
+  @override
+  Future<WhatsAppCallOutcome> callViaWhatsApp(String? number) async {
+    whatsAppDialled.add(number);
+    return whatsApp ?? WhatsAppCallOutcome.failed;
+  }
+
+  /// Izin Kontak; diberikan saat izin diminta.
+  bool contactsAllowed = false;
+
+  /// Apakah WhatsApp langsung mengenali kontak yang baru disimpan.
+  bool syncsInstantly = true;
+  bool whatsAppReady = false;
+  final savedContacts = <String?>[];
+  int permissionRequests = 0;
+
+  @override
+  Future<bool> requestPermission() async {
+    permissionRequests++;
+    contactsAllowed = true;
+    return true;
+  }
+
+  @override
+  Future<bool> saveParentContact(String? number, {required String name}) async {
+    savedContacts.add(number);
+    if (whatsApp == null || !contactsAllowed) return false;
+    if (syncsInstantly) whatsAppReady = true;
+    return true;
+  }
+
+  @override
+  Future<bool> whatsAppCallReady(String? number) async =>
+      whatsApp != null && whatsAppReady;
 }
 
 /// Telepon yang tidak pernah menjawab, untuk memastikan layar tidak macet.
@@ -371,6 +409,170 @@ void main() {
 
       expect(find.textContaining('tombol panggil hijau'), findsOneWidget);
       expect(find.text('Kami sudah menelepon orang tuamu.'), findsNothing);
+    });
+  });
+
+  group('telepon lewat WhatsApp', () {
+    setUp(() => SharedPreferences.setMockInitialValues({}));
+
+    Future<void> sendSos(WidgetTester tester) async {
+      await tester.tap(orb());
+      await wait(tester, const Duration(milliseconds: 3600));
+    }
+
+    testWidgets('tanpa WhatsApp: tombolnya tidak muncul', (tester) async {
+      await openChildHome(tester, call: _FakeCall());
+      await sendSos(tester);
+
+      expect(find.text('Pesan daruratmu terkirim'), findsOneWidget);
+      expect(find.text('Telepon lewat WhatsApp'), findsNothing);
+    });
+
+    testWidgets('anak menelepon orang tua lewat WhatsApp dari lembar SOS', (
+      tester,
+    ) async {
+      final call = _FakeCall(CallOutcome.called, WhatsAppCallOutcome.called);
+      await openChildHome(tester, call: call);
+      await sendSos(tester);
+
+      // Telepon seluler tetap jalur utama; WhatsApp hanya bila diminta.
+      expect(call.dialled, ['+6281234567890']);
+      expect(call.whatsAppDialled, isEmpty);
+
+      await tester.tap(find.text('Telepon lewat WhatsApp'));
+      await wait(tester, const Duration(milliseconds: 300));
+
+      expect(call.whatsAppDialled, ['+6281234567890']);
+      expect(
+        find.text('Kami sudah menelepon orang tuamu lewat WhatsApp.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('nomor tidak ada di Kontak: chat dibuka, anak diberi tahu', (
+      tester,
+    ) async {
+      await openChildHome(
+        tester,
+        call: _FakeCall(CallOutcome.called, WhatsAppCallOutcome.chatOpened),
+      );
+      await sendSos(tester);
+      await tester.tap(find.text('Telepon lewat WhatsApp'));
+      await wait(tester, const Duration(milliseconds: 300));
+
+      expect(find.textContaining('Tekan ikon telepon'), findsOneWidget);
+      expect(find.textContaining('lewat WhatsApp.'), findsNothing);
+    });
+
+    testWidgets('tanpa internet: tidak mengaku panggilan WhatsApp pasti masuk', (
+      tester,
+    ) async {
+      await openChildHome(
+        tester,
+        call: _FakeCall(CallOutcome.called, WhatsAppCallOutcome.called),
+        repository: _OfflineRepository(),
+      );
+      await sendSos(tester);
+      await tester.tap(find.text('Telepon lewat WhatsApp'));
+      await wait(tester, const Duration(milliseconds: 300));
+
+      expect(find.textContaining('internet sepertinya'), findsOneWidget);
+      expect(
+        find.text('Kami sudah menelepon orang tuamu lewat WhatsApp.'),
+        findsNothing,
+      );
+    });
+
+    testWidgets('perangkat tanpa SIM diarahkan ke tombol WhatsApp', (
+      tester,
+    ) async {
+      await openChildHome(
+        tester,
+        call: _FakeCall(CallOutcome.failed, WhatsAppCallOutcome.called),
+      );
+      await sendSos(tester);
+
+      expect(find.textContaining('lewat WhatsApp di bawah'), findsOneWidget);
+      expect(find.text('Telepon lewat WhatsApp'), findsOneWidget);
+    });
+  });
+
+  group('WhatsApp langsung menelepon', () {
+    setUp(() => SharedPreferences.setMockInitialValues({}));
+
+    Future<void> openSettings(WidgetTester tester) async {
+      await tester.tap(find.bySemanticsLabel('Pusat bantuan'));
+      await wait(tester, const Duration(milliseconds: 600));
+      await tester.tap(find.text('Pengaturan'));
+      await wait(tester, const Duration(milliseconds: 600));
+    }
+
+    Future<void> tapText(WidgetTester tester, String text) async {
+      await tester.ensureVisible(find.text(text));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text(text));
+      await wait(tester, const Duration(milliseconds: 300));
+    }
+
+    testWidgets('nomor orang tua disimpan ke Kontak begitu tertaut', (
+      tester,
+    ) async {
+      // Disimpan jauh sebelum darurat, supaya WhatsApp sempat mengenalinya.
+      final call = _FakeCall(CallOutcome.called, WhatsAppCallOutcome.called)
+        ..contactsAllowed = true;
+      await openChildHome(tester, call: call);
+
+      expect(call.savedContacts, ['+6281234567890']);
+      expect(call.whatsAppReady, isTrue);
+    });
+
+    testWidgets('Pengaturan: belum siap, lalu Siapkan membuatnya siap', (
+      tester,
+    ) async {
+      // Ponsel yang memberi persetujuan sebelum fitur ini ada: izin Kontak
+      // belum pernah diminta.
+      final call = _FakeCall(CallOutcome.called, WhatsAppCallOutcome.called);
+      await openChildHome(tester, call: call);
+      await openSettings(tester);
+
+      expect(find.text('Telepon WhatsApp'), findsOneWidget);
+      expect(find.textContaining('baru membuka chat'), findsOneWidget);
+
+      await tapText(tester, 'Siapkan');
+
+      expect(call.permissionRequests, 1);
+      expect(call.savedContacts.last, '+6281234567890');
+      expect(find.text('Siap, langsung menelepon'), findsOneWidget);
+    });
+
+    testWidgets('Pengaturan: kontak tersimpan tapi WhatsApp belum mengenalinya', (
+      tester,
+    ) async {
+      final call = _FakeCall(CallOutcome.called, WhatsAppCallOutcome.called)
+        ..syncsInstantly = false;
+      await openChildHome(tester, call: call);
+      await openSettings(tester);
+      await tapText(tester, 'Siapkan');
+
+      // Jujur: belum siap sampai WhatsApp benar-benar mengenali nomornya.
+      expect(find.textContaining('Buka WhatsApp sekali'), findsOneWidget);
+      expect(find.text('Siap, langsung menelepon'), findsNothing);
+
+      call.whatsAppReady = true;
+      await tapText(tester, 'Periksa lagi');
+      expect(find.text('Siap, langsung menelepon'), findsOneWidget);
+    });
+
+    testWidgets('tanpa WhatsApp: tidak ada baris dan tidak ada kontak', (
+      tester,
+    ) async {
+      final call = _FakeCall()..contactsAllowed = true;
+      await openChildHome(tester, call: call);
+      await openSettings(tester);
+
+      expect(find.text('Ditelepon saat darurat'), findsOneWidget);
+      expect(find.text('Telepon WhatsApp'), findsNothing);
+      expect(call.whatsAppReady, isFalse);
     });
   });
 

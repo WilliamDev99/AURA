@@ -160,8 +160,14 @@ class _ChildHomePageState extends State<ChildHomePage>
             return false;
           },
         );
-    final call = await state.callParent();
+    final callFuture = state.callParent();
+    // Diperiksa bersamaan, bukan setelah telepon selesai: telepon yang macet
+    // sampai batas waktunya tidak boleh menunda lembar konfirmasi lebih lama
+    // lagi. Perintah telepon tetap berangkat lebih dulu.
+    final whatsAppFuture = state.canCallParentViaWhatsApp();
+    final call = await callFuture;
     final alertSent = await alertSentFuture;
+    final canUseWhatsApp = await whatsAppFuture;
 
     if (!mounted) return;
     setState(() => _sending = false);
@@ -176,6 +182,7 @@ class _ChildHomePageState extends State<ChildHomePage>
         onCallAgain: state.emergencyNumber == null
             ? null
             : () => state.callParent(),
+        onCallViaWhatsApp: canUseWhatsApp ? state.callParentViaWhatsApp : null,
       ),
     );
   }
@@ -531,11 +538,12 @@ class _OrbLabel extends StatelessWidget {
   }
 }
 
-class _PanicSentSheet extends StatelessWidget {
+class _PanicSentSheet extends StatefulWidget {
   const _PanicSentSheet({
     required this.alertSent,
     required this.call,
     required this.onCallAgain,
+    this.onCallViaWhatsApp,
     this.location,
   });
 
@@ -546,6 +554,34 @@ class _PanicSentSheet extends StatelessWidget {
 
   /// Null bila tidak ada nomor yang bisa ditelepon.
   final VoidCallback? onCallAgain;
+
+  /// Null bila WhatsApp tidak terpasang atau tidak ada nomor.
+  final Future<WhatsAppCallOutcome> Function()? onCallViaWhatsApp;
+
+  @override
+  State<_PanicSentSheet> createState() => _PanicSentSheetState();
+}
+
+class _PanicSentSheetState extends State<_PanicSentSheet> {
+  /// Hasil tombol "Telepon lewat WhatsApp"; null selama belum ditekan.
+  WhatsAppCallOutcome? _whatsApp;
+  bool _callingWhatsApp = false;
+
+  bool get alertSent => widget.alertSent;
+  CallOutcome get call => widget.call;
+  LocationResult? get location => widget.location;
+
+  Future<void> _callViaWhatsApp() async {
+    final start = widget.onCallViaWhatsApp;
+    if (start == null || _callingWhatsApp) return;
+    setState(() => _callingWhatsApp = true);
+    final outcome = await start();
+    if (!mounted) return;
+    setState(() {
+      _callingWhatsApp = false;
+      _whatsApp = outcome;
+    });
+  }
 
   /// Apa yang dikatakan ke anak soal lokasinya.
   ///
@@ -626,6 +662,14 @@ class _PanicSentSheet extends StatelessWidget {
         'menelepon. Minta orang tuamu mengisinya di aplikasi AURA mereka.',
       ),
     ),
+    CallOutcome.failed when widget.onCallViaWhatsApp != null => (
+      Icons.phone_disabled_rounded,
+      AuraColors.medium,
+      tr(
+        'Ponsel ini tidak bisa menelepon biasa. Coba telepon orang tuamu '
+        'lewat WhatsApp di bawah.',
+      ),
+    ),
     CallOutcome.failed => (
       Icons.phone_disabled_rounded,
       AuraColors.critical,
@@ -636,8 +680,47 @@ class _PanicSentSheet extends StatelessWidget {
     ),
   };
 
+  /// Apa yang dikatakan ke anak setelah menekan "Telepon lewat WhatsApp".
+  ///
+  /// WhatsApp butuh internet. Kalau peringatan saja tidak sampai, anak tidak
+  /// boleh dibuat yakin panggilannya pasti tersambung.
+  (IconData, Color, String)? get _whatsAppNote => switch (_whatsApp) {
+    null => null,
+    WhatsAppCallOutcome.called when !alertSent => (
+      Icons.wifi_calling_3_rounded,
+      AuraColors.medium,
+      tr(
+        'Kami mencoba menelepon orang tuamu lewat WhatsApp, tapi internet '
+        'sepertinya sedang tidak tersambung. Kalau panggilannya tidak masuk, '
+        'minta tolong orang dewasa di dekatmu.',
+      ),
+    ),
+    WhatsAppCallOutcome.called => (
+      Icons.wifi_calling_3_rounded,
+      AuraColors.safe,
+      tr('Kami sudah menelepon orang tuamu lewat WhatsApp.'),
+    ),
+    WhatsAppCallOutcome.chatOpened => (
+      Icons.wifi_calling_3_rounded,
+      AuraColors.medium,
+      tr(
+        'Chat WhatsApp orang tuamu sudah dibuka. Tekan ikon telepon di '
+        'pojok kanan atas untuk menelepon.',
+      ),
+    ),
+    WhatsAppCallOutcome.failed => (
+      Icons.phone_disabled_rounded,
+      AuraColors.critical,
+      tr(
+        'WhatsApp tidak bisa dibuka. Coba telepon biasa, atau minta tolong '
+        'orang dewasa di dekatmu.',
+      ),
+    ),
+  };
+
   @override
   Widget build(BuildContext context) {
+    final whatsAppNote = _whatsAppNote;
     final reached = alertSent || call == CallOutcome.called;
     final headline = alertSent
         ? tr('Pesan daruratmu terkirim')
@@ -699,14 +782,27 @@ class _PanicSentSheet extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           _Note(note: _callNote),
+          if (whatsAppNote != null) ...[
+            const SizedBox(height: 10),
+            _Note(note: whatsAppNote),
+          ],
           const SizedBox(height: 10),
           _Note(note: _locationNote),
           const SizedBox(height: 22),
-          if (onCallAgain != null) ...[
+          if (widget.onCallAgain != null) ...[
             OutlinedButton.icon(
-              onPressed: onCallAgain,
+              onPressed: widget.onCallAgain,
               icon: const Icon(Icons.call_rounded),
               label: Text(tr('Telepon orang tua lagi')),
+            ),
+            const SizedBox(height: 10),
+          ],
+          if (widget.onCallViaWhatsApp != null) ...[
+            // Untuk HP tanpa pulsa atau tablet tanpa SIM, selama ada internet.
+            OutlinedButton.icon(
+              onPressed: _callingWhatsApp ? null : _callViaWhatsApp,
+              icon: const Icon(Icons.wifi_calling_3_rounded),
+              label: Text(tr('Telepon lewat WhatsApp')),
             ),
             const SizedBox(height: 10),
           ],
