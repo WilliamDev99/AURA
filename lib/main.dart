@@ -11,6 +11,7 @@ import 'core/router/app_router.dart';
 import 'core/services/notification_scanner.dart';
 import 'core/services/push_service.dart';
 import 'core/theme/aura_theme.dart';
+import 'core/widgets/sos_alarm_banner.dart';
 import 'data/aura_repository.dart';
 import 'data/demo_repository.dart';
 import 'data/firestore_repository.dart';
@@ -125,7 +126,8 @@ class AuraApp extends StatefulWidget {
   /// Bisa diganti pada pengujian, agar tidak menunggu perangkat GPS asli.
   final LocationService locationService;
 
-  /// Bisa diganti pada pengujian, agar test tidak benar-benar menelepon.
+  /// Bisa diganti pada pengujian, agar test tidak benar-benar membuka
+  /// aplikasi Telepon.
   final EmergencyCallService callService;
 
   @override
@@ -163,7 +165,11 @@ class _AuraAppState extends State<AuraApp> {
     _lifecycle = AppLifecycleListener(
       onResume: () {
         _state.refreshChatScanStatus();
+        // Izin jam istirahat bisa baru saja dinyalakan di Pengaturan.
+        _state.refreshLockAccess();
         _state.markActive();
+        // Alarm SOS bisa dibunyikan atau dimatikan selagi AURA di belakang.
+        if (widget.pushReady) PushService.instance.onResumed();
       },
     );
     _heartbeat = Timer.periodic(
@@ -187,6 +193,7 @@ class _AuraAppState extends State<AuraApp> {
     await PushService.instance.attach(
       router: _router,
       repository: widget.repository,
+      untilReady: _state.untilRestored,
     );
 
     // Token dilepas sebelum sesi berakhir, selagi pengguna masih berwenang
@@ -223,6 +230,13 @@ class _AuraAppState extends State<AuraApp> {
         debugShowCheckedModeBanner: false,
         theme: AuraTheme.build(),
         routerConfig: _router,
+        // Di atas semua halaman: tombol mematikan alarm SOS harus ada di
+        // mana pun orang tua sedang berada.
+        builder: (context, child) => SosAlarmBanner(
+          alarm: PushService.instance.sosAlarm,
+          onStop: PushService.instance.stopSosAlarm,
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
   }

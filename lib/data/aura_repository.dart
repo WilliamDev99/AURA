@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import '../domain/models/app_user.dart';
 import '../domain/models/evidence_item.dart';
 import '../domain/models/guardian_message.dart';
+import '../domain/models/lock_schedule.dart';
 import '../domain/models/threat_alert.dart';
 import '../domain/services/threat_analyzer.dart';
 
@@ -67,7 +68,7 @@ abstract interface class AuraRepository {
   /// tua lama yang masuk lagi, bukan pendaftar baru.
   Future<bool> hasProfile();
 
-  /// Mengganti nomor HP orang tua yang ditelepon saat SOS (format +62...).
+  /// Mengganti nomor HP darurat orang tua (format +62...).
   Future<void> updatePhone(String phone);
 
   /// Mengunggah foto profil baru (JPEG) dan menghapus foto lama.
@@ -144,8 +145,8 @@ abstract interface class AuraRepository {
   /// miliknya berhenti menerima peringatan keluarga ini.
   Future<void> removePushToken(String token);
 
-  /// Nomor HP orang tua yang ditelepon saat anak menekan tombol darurat:
-  /// orang tua pertama di keluarga ini yang sudah mengisi nomor.
+  /// Nomor HP yang bisa ditelepon anak bila SOS-nya tidak terkirim: orang
+  /// tua pertama di keluarga ini yang sudah mengisi nomor.
   Future<String?> emergencyNumber();
 
   /// Penilaian lapis kedua oleh AI untuk pesan yang lolos daftar kata.
@@ -168,6 +169,17 @@ abstract interface class AuraRepository {
 
   /// Menyalakan atau mematikan perlindungan untuk satu anak.
   Future<void> setProtectionActive(String childId, bool active);
+
+  /// Mengatur jam istirahat anak. Hanya orang tua sekeluarga.
+  Future<void> setLockSchedule(String childId, LockSchedule schedule);
+
+  /// Ponsel anak melaporkan apakah izin untuk mengunci aplikasi sudah ada.
+  Future<void> reportLockReady(bool ready);
+
+  /// Ponsel anak mengambil ulang profilnya sekarang juga (mis. layar baru
+  /// menyala), tanpa menunggu realtime, supaya jam istirahat yang baru diubah
+  /// orang tua langsung berlaku.
+  Future<void> refreshProfile();
 
   /// Ponsel anak melaporkan apakah pemindaian chat ("Akses notifikasi")
   /// sedang menyala, supaya terlihat di ponsel orang tua.

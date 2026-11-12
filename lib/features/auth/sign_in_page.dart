@@ -135,8 +135,8 @@ class _SignInPageState extends State<SignInPage> {
           icon: Icons.badge_outlined,
           title: tr('Satu langkah lagi'),
           text: tr(
-            'Isi nama dan nomor HP Anda. Nomor ini yang ditelepon saat anak '
-            'menekan tombol darurat.',
+            'Isi nama dan nomor HP Anda. Kalau SOS anak tidak terkirim karena '
+            'internetnya mati, anak bisa menelepon nomor ini.',
           ),
         ),
         const SizedBox(height: 20),
@@ -238,14 +238,12 @@ class _SignInPageState extends State<SignInPage> {
                 decoration: InputDecoration(
                   labelText: tr('Nomor HP Anda'),
                   hintText: '0812 3456 7890',
-                  helperText: tr(
-                    'Ditelepon otomatis saat anak menekan tombol darurat.',
-                  ),
+                  helperText: tr('Cadangan bila SOS anak tidak terkirim.'),
                   prefixIcon: const Icon(Icons.phone_outlined),
                   errorText: _phoneWarning,
                 ),
-                // Wajib: tanpa nomor, tombol darurat anak tidak bisa
-                // menelepon siapa pun.
+                // Wajib: tanpa internet, SOS anak tidak membunyikan alarm,
+                // dan nomor ini satu-satunya jalan menghubungi orang tua.
                 validator: (value) =>
                     normalizeIndonesianPhone(value ?? '') == null
                     ? tr('Isi nomor HP Indonesia, mis. 0812 3456 7890')

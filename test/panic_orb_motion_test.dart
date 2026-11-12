@@ -46,4 +46,26 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     expect(tester.binding.hasScheduledFrame, isTrue);
   });
+
+  testWidgets(
+    'layar belum punya ukuran: orb tidak membuat aplikasi macet',
+    (tester) async {
+      // Saat Android menyalakan AURA di latar belakang untuk pemindai pesan,
+      // beranda anak dibangun dengan layar 0 x 0. Dulu jarak antarcincin halo
+      // ikut nol dan loop menggambarnya tidak pernah selesai: aplikasi macet
+      // di layar pembuka saat ikonnya diketuk, dan tombol SOS tidak pernah
+      // muncul. Kalau bug itu kembali, test ini berhenti karena batas waktu.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(child: PanicOrb(size: 0, onTap: () {})),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(tester.takeException(), isNull);
+    },
+    timeout: const Timeout(Duration(seconds: 20)),
+  );
 }

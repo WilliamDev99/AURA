@@ -270,8 +270,6 @@ const englishAppStrings = <String, String>{
   'Pakai email atau Facebook supaya akun Anda aman. Ganti HP atau pasang ulang aplikasi? Masuk lagi dengan akun yang sama, dan semua data tetap ada.':
       'Use email or Facebook to keep your account safe. Changing phones or reinstalling the app? Sign in again with the same account, and all your data is still there.',
   'Membuka akun Anda...': 'Opening your account...',
-  'Isi nama dan nomor HP Anda. Nomor ini yang ditelepon saat anak menekan tombol darurat.':
-      'Enter your name and phone number. This number is called when your child presses the emergency button.',
   'Daftarkan Anak': 'Register Child',
   'Masuk sebagai Orang Tua': 'Sign in as Parent',
   'Ponsel ini akan dilindungi AURA': 'This phone will be protected by AURA',
@@ -281,8 +279,6 @@ const englishAppStrings = <String, String>{
   'Nama Anda': 'Your name',
   'Ayu': 'Ayu',
   'Nomor HP Anda': 'Your phone number',
-  'Ditelepon otomatis saat anak menekan tombol darurat.':
-      'Called automatically when your child presses the emergency button.',
   'Usia hanya boleh berisi angka.': 'Age can only contain digits.',
   'Usia anak': 'Child\'s age',
   'Isi usia dengan angka': 'Enter the age as a number',
@@ -305,10 +301,6 @@ const englishAppStrings = <String, String>{
       'Sends your location when you press the emergency button',
   'Setiap AURA dibuka, kamu diminta menyalakan GPS supaya lokasimu siap kalau darurat. Lokasi tetap hanya dikirim saat kamu sendiri yang menekan tombol itu.':
       'Every time AURA opens, you are asked to turn on GPS so your location is ready in an emergency. Your location is still only sent when you press that button yourself.',
-  'Menelepon orang tuamu kalau kamu menekan tombol darurat':
-      'Calls your parents when you press the emergency button',
-  'Supaya orang tuamu bisa langsung bicara denganmu. Tetap jalan walau internet sedang mati. Kalau ponselmu tidak punya pulsa, kamu juga bisa menelepon lewat WhatsApp; untuk itu AURA menyimpan nomor orang tuamu di Kontak kalau belum ada. Kontak lain tidak diubah, dibaca, atau dikirim ke mana pun.':
-      'So your parents can talk to you right away. It still works when the internet is down. If your phone has no call credit, you can also call through WhatsApp; for that, AURA saves your parent\'s number in Contacts if it isn\'t there yet. Other contacts are never changed, read, or sent anywhere.',
   'Membalas obrolanmu dengan Aura memakai AI':
       'Answers your chats with Aura using AI',
   'Pesan yang kamu tulis ke Aura dikirim ke layanan AI supaya Aura bisa menjawab, dan tidak dipakai untuk melatih AI. Pesan yang berbahaya tidak dikirim ke sana; orang tuamu yang diberi tahu.':
@@ -348,8 +340,6 @@ const englishAppStrings = <String, String>{
   'Panic Orb': 'Panic Orb',
   'Tekan sekali untuk SOS': 'Press once for SOS',
   'Batalkan SOS': 'Cancel SOS',
-  'Lokasimu belum terkirim karena internet sedang tidak tersambung. Sebutkan kamu di mana saat orang tuamu mengangkat telepon.':
-      'Your location wasn\'t sent because the internet isn\'t connected. Tell your parents where you are when they answer the call.',
   'Lokasi terakhirmu ikut terkirim. Kalau kamu sudah pindah, beri tahu orang tuamu kamu di mana.':
       'Your last known location was sent too. If you\'ve moved, tell your parents where you are.',
   'Lokasimu ikut terkirim.': 'Your location was sent too.',
@@ -361,43 +351,14 @@ const englishAppStrings = <String, String>{
       'Your location wasn\'t sent because there\'s no GPS signal yet.',
   '{reason} Kalau bisa, kabari orang tuamu kamu di mana.':
       '{reason} If you can, tell your parents where you are.',
-  'Kami sudah menelepon orang tuamu.': 'We\'ve called your parents.',
   'Nomor orang tuamu sudah disiapkan di aplikasi Telepon. Tekan tombol panggil hijau kalau belum.':
       'Your parent\'s number is ready in the Phone app. Press the green call button if you haven\'t yet.',
-  'Nomor HP orang tuamu belum diisi, jadi kami belum bisa menelepon. Minta orang tuamu mengisinya di aplikasi AURA mereka.':
-      'Your parent\'s phone number isn\'t set yet, so we can\'t call. Ask your parents to add it in their AURA app.',
   'Ponsel ini tidak bisa menelepon. Kalau bisa, minta tolong orang dewasa di dekatmu.':
       'This phone can\'t make calls. If you can, ask an adult nearby for help.',
-  'Ponsel ini tidak bisa menelepon biasa. Coba telepon orang tuamu lewat WhatsApp di bawah.':
-      'This phone can\'t make regular calls. Try calling your parents through WhatsApp below.',
-  'Kami mencoba menelepon orang tuamu lewat WhatsApp, tapi internet sepertinya sedang tidak tersambung. Kalau panggilannya tidak masuk, minta tolong orang dewasa di dekatmu.':
-      'We tried to call your parents through WhatsApp, but the internet doesn\'t seem to be connected. If the call doesn\'t go through, ask an adult nearby for help.',
-  'Kami sudah menelepon orang tuamu lewat WhatsApp.':
-      'We\'ve called your parents through WhatsApp.',
-  'Chat WhatsApp orang tuamu sudah dibuka. Tekan ikon telepon di pojok kanan atas untuk menelepon.':
-      'Your parent\'s WhatsApp chat is open. Tap the phone icon in the top right corner to call.',
-  'WhatsApp tidak bisa dibuka. Coba telepon biasa, atau minta tolong orang dewasa di dekatmu.':
-      'WhatsApp couldn\'t be opened. Try a regular call, or ask an adult nearby for help.',
-  'Telepon lewat WhatsApp': 'Call through WhatsApp',
   // settings_page.dart: kesiapan telepon WhatsApp
-  'Orang Tua (AURA)': 'Parent (AURA)',
-  'Telepon WhatsApp': 'WhatsApp calls',
-  'Siap, langsung menelepon': 'Ready, calls right away',
-  'Saat SOS, tombol WhatsApp baru membuka chat. Siapkan supaya langsung menelepon.':
-      'During an SOS, the WhatsApp button only opens the chat. Set it up so it calls right away.',
-  'Nomor orang tuamu sudah ada di Kontak. Buka WhatsApp sekali supaya nomornya dikenali, lalu kembali ke sini.':
-      'Your parent\'s number is in Contacts now. Open WhatsApp once so it recognises the number, then come back here.',
-  'Izin Kontak dibutuhkan supaya WhatsApp bisa langsung menelepon orang tuamu.':
-      'Contacts permission is needed so WhatsApp can call your parents right away.',
   'Periksa lagi': 'Check again',
   'Siapkan': 'Set up',
   'Pesan daruratmu terkirim': 'Your emergency message was sent',
-  'Peringatan belum terkirim': 'The alert hasn\'t been sent yet',
-  'Orang tuamu sudah menerima peringatanmu. Tetap di tempat yang ramai dan terang kalau bisa.':
-      'Your parents received your alert. Stay somewhere busy and well-lit if you can.',
-  'Internet sedang tidak tersambung, jadi peringatan belum sampai. Tetap di tempat yang ramai dan terang kalau bisa.':
-      'The internet isn\'t connected, so the alert hasn\'t arrived yet. Stay somewhere busy and well-lit if you can.',
-  'Telepon orang tua lagi': 'Call parents again',
   'Oke': 'Okay',
   // child_pairing_page.dart
   'Teman': 'Friend',

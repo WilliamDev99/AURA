@@ -1,3 +1,5 @@
+import 'lock_schedule.dart';
+
 /// Peran pengguna dalam satu keluarga AURA.
 enum UserRole { parent, child }
 
@@ -18,6 +20,8 @@ class AppUser {
     this.chatScanEnabled,
     this.chatScanCheckedAt,
     this.avatarPath,
+    this.lockSchedule,
+    this.lockReady,
   });
 
   final String id;
@@ -33,8 +37,8 @@ class AppUser {
   final DateTime? lastSeenAt;
   final bool protectionActive;
 
-  /// Nomor HP orang tua dalam format +62..., ditelepon otomatis saat anak
-  /// menekan tombol darurat. Kosong untuk anak.
+  /// Nomor HP orang tua dalam format +62..., untuk ditelepon anak bila SOS
+  /// tidak terkirim karena internetnya mati. Kosong untuk anak.
   final String? phone;
 
   /// Dilaporkan ponsel anak: apakah "Akses notifikasi" untuk AURA menyala.
@@ -46,6 +50,13 @@ class AppUser {
 
   /// Letak foto profil di penyimpanan; null bila belum ada foto.
   final String? avatarPath;
+
+  /// Jam istirahat anak, diatur orang tua. Null bila belum pernah diatur.
+  final LockSchedule? lockSchedule;
+
+  /// Dilaporkan ponsel anak: apakah izin untuk mengunci aplikasi sudah
+  /// diberikan. Null bila belum pernah dilaporkan.
+  final bool? lockReady;
 
   bool get hasConsented => monitoringConsentAt != null;
   bool get isChild => role == UserRole.child;
@@ -63,6 +74,8 @@ class AppUser {
     DateTime? chatScanCheckedAt,
     String? avatarPath,
     bool removeAvatar = false,
+    LockSchedule? lockSchedule,
+    bool? lockReady,
   }) {
     return AppUser(
       id: id,
@@ -79,6 +92,8 @@ class AppUser {
       chatScanEnabled: chatScanEnabled ?? this.chatScanEnabled,
       chatScanCheckedAt: chatScanCheckedAt ?? this.chatScanCheckedAt,
       avatarPath: removeAvatar ? null : avatarPath ?? this.avatarPath,
+      lockSchedule: lockSchedule ?? this.lockSchedule,
+      lockReady: lockReady ?? this.lockReady,
     );
   }
 
@@ -97,6 +112,8 @@ class AppUser {
     'chatScanEnabled': chatScanEnabled,
     'chatScanCheckedAt': chatScanCheckedAt?.toUtc().toIso8601String(),
     'avatarPath': avatarPath,
+    'lockSchedule': lockSchedule?.toJson(),
+    'lockReady': lockReady,
   };
 
   factory AppUser.fromMap(Map<String, dynamic> map) => AppUser(
@@ -114,6 +131,8 @@ class AppUser {
     chatScanEnabled: map['chatScanEnabled'] as bool?,
     chatScanCheckedAt: _date(map['chatScanCheckedAt']),
     avatarPath: map['avatarPath'] as String?,
+    lockSchedule: LockSchedule.fromJson(map['lockSchedule']),
+    lockReady: map['lockReady'] as bool?,
   );
 
   static DateTime? _date(Object? value) =>

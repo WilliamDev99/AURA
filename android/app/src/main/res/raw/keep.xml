@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Suara alarm SOS hanya dirujuk lewat nama (saluran notifikasi dan pesan
+     FCM), bukan lewat kode. Tanpa ini, build rilis bisa membuangnya dan alarm
+     di HP orang tua kembali ke bunyi notifikasi biasa. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/aura_sos_alarm" />

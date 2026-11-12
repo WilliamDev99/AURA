@@ -44,71 +44,27 @@ class _FakeLocation extends LocationService {
   Future<bool> requestPermission() async => result.hasPosition;
 }
 
-/// Telepon tiruan: mencatat nomor yang ditelepon, tanpa benar-benar menelepon.
-class _FakeCall extends EmergencyCallService {
-  _FakeCall([this.outcome = CallOutcome.called, this.whatsApp]);
+/// Aplikasi Telepon tiruan: mencatat nomor yang dibuka, tanpa benar-benar
+/// membuka apa pun.
+class _FakeDialer extends EmergencyCallService {
+  _FakeDialer({this.opens = true});
 
-  final CallOutcome outcome;
-
-  /// Hasil panggilan WhatsApp; null berarti WhatsApp tidak terpasang.
-  final WhatsAppCallOutcome? whatsApp;
-  final dialled = <String?>[];
-  final whatsAppDialled = <String?>[];
+  /// False meniru tablet tanpa SIM: aplikasi Telepon tidak ada.
+  final bool opens;
+  final opened = <String?>[];
 
   @override
-  Future<CallOutcome> call(String? number) async {
-    dialled.add(number);
-    return number == null ? CallOutcome.noNumber : outcome;
+  Future<bool> openDialer(String? number) async {
+    opened.add(number);
+    return number != null && opens;
   }
-
-  @override
-  Future<bool> hasWhatsApp() async => whatsApp != null;
-
-  @override
-  Future<WhatsAppCallOutcome> callViaWhatsApp(String? number) async {
-    whatsAppDialled.add(number);
-    return whatsApp ?? WhatsAppCallOutcome.failed;
-  }
-
-  /// Izin Kontak; diberikan saat izin diminta.
-  bool contactsAllowed = false;
-
-  /// Apakah WhatsApp langsung mengenali kontak yang baru disimpan.
-  bool syncsInstantly = true;
-  bool whatsAppReady = false;
-  final savedContacts = <String?>[];
-  int permissionRequests = 0;
-
-  @override
-  Future<bool> requestPermission() async {
-    permissionRequests++;
-    contactsAllowed = true;
-    return true;
-  }
-
-  @override
-  Future<bool> saveParentContact(String? number, {required String name}) async {
-    savedContacts.add(number);
-    if (whatsApp == null || !contactsAllowed) return false;
-    if (syncsInstantly) whatsAppReady = true;
-    return true;
-  }
-
-  @override
-  Future<bool> whatsAppCallReady(String? number) async =>
-      whatsApp != null && whatsAppReady;
-}
-
-/// Telepon yang tidak pernah menjawab, untuk memastikan layar tidak macet.
-class _HangingCall extends EmergencyCallService {
-  const _HangingCall();
-
-  @override
-  Future<CallOutcome> call(String? number) => Completer<CallOutcome>().future;
 }
 
 /// Meniru HP anak tanpa internet: menyimpan bukti dan peringatan gagal.
+/// [online] bisa dinyalakan di tengah test, seperti sinyal yang kembali.
 class _OfflineRepository extends DemoRepository {
+  bool online = false;
+
   @override
   Future<EvidenceItem> appendEvidence({
     required String childId,
@@ -119,7 +75,19 @@ class _OfflineRepository extends DemoRepository {
     String? alertId,
     String? storagePath,
     String? consentNote,
-  }) => Future.error(const _NoInternet());
+  }) {
+    if (!online) return Future.error(const _NoInternet());
+    return super.appendEvidence(
+      childId: childId,
+      kind: kind,
+      capturedAt: capturedAt,
+      description: description,
+      payload: payload,
+      alertId: alertId,
+      storagePath: storagePath,
+      consentNote: consentNote,
+    );
+  }
 }
 
 class _NoInternet implements Exception {
@@ -128,14 +96,41 @@ class _NoInternet implements Exception {
   String toString() => 'SocketException: Failed host lookup';
 }
 
-/// Keluarga yang orang tuanya belum mengisi nomor HP.
-class _NoNumberRepository extends DemoRepository {
+/// Tanpa internet, dan orang tuanya belum mengisi nomor HP.
+class _OfflineNoNumberRepository extends _OfflineRepository {
   @override
   Future<String?> emergencyNumber() async => null;
 }
 
-/// Perilaku Panic Orb: "tekan sekali untuk SOS", dengan jeda 3 detik yang bisa
-/// dibatalkan supaya sentuhan tak sengaja tidak membuat orang tua panik.
+/// Jaringan yang tidak pernah menjawab: permintaan menggantung, tidak gagal.
+class _HangingRepository extends DemoRepository {
+  @override
+  Future<EvidenceItem> appendEvidence({
+    required String childId,
+    required EvidenceKind kind,
+    required DateTime capturedAt,
+    required String description,
+    required String payload,
+    String? alertId,
+    String? storagePath,
+    String? consentNote,
+  }) => Completer<EvidenceItem>().future;
+}
+
+/// GPS yang tidak pernah menjawab, mis. di dalam gedung.
+class _HangingLocation extends LocationService {
+  const _HangingLocation();
+
+  @override
+  Future<LocationResult> current({Duration timeout = Duration.zero}) =>
+      Completer<LocationResult>().future;
+
+  @override
+  Future<bool> requestPermission() async => true;
+}
+
+/// Perilaku Panic Orb: "tekan sekali untuk SOS", langsung terkirim tanpa
+/// hitung mundur. Anak yang sedang dalam bahaya tidak boleh dibuat menunggu.
 void main() {
   // Dibuat di dalam test: finder semantik butuh binding yang sudah siap.
   Finder orb() => find.bySemanticsLabel(
@@ -145,7 +140,7 @@ void main() {
   Future<AppState> openChildHome(
     WidgetTester tester, {
     LocationService? location,
-    EmergencyCallService? call,
+    EmergencyCallService? dialer,
     AuraRepository? repository,
   }) async {
     tester.view.physicalSize = const Size(1344, 2992);
@@ -156,7 +151,7 @@ void main() {
       AuraApp(
         repository: repository ?? DemoRepository(),
         locationService: location ?? _FakeLocation.found(),
-        callService: call ?? _FakeCall(),
+        callService: dialer ?? _FakeDialer(),
       ),
     );
     await tester.pump(const Duration(milliseconds: 100));
@@ -189,39 +184,40 @@ void main() {
     }
   }
 
-  testWidgets('satu ketukan mengirim SOS setelah hitung mundur 3 detik', (
+  testWidgets('satu ketukan langsung mengirim SOS, tanpa hitung mundur', (
     tester,
   ) async {
     final state = await openChildHome(tester);
     final before = panicAlerts(state);
 
     await tester.tap(orb());
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump();
 
-    expect(find.text('Batalkan'), findsOneWidget);
-    expect(find.text('SOS terkirim dalam 3 detik'), findsOneWidget);
-    expect(panicAlerts(state), before, reason: 'belum boleh terkirim');
+    expect(find.text('Batalkan'), findsNothing);
+    expect(find.textContaining('SOS terkirim dalam'), findsNothing);
 
-    await wait(tester, const Duration(milliseconds: 1100));
-    expect(find.text('SOS terkirim dalam 2 detik'), findsOneWidget);
-
-    await wait(tester, const Duration(milliseconds: 2400));
+    await wait(tester, const Duration(milliseconds: 600));
     expect(panicAlerts(state), before + 1);
     expect(find.text('Pesan daruratmu terkirim'), findsOneWidget);
   });
 
-  testWidgets('kartu Batalkan menghentikan SOS', (tester) async {
-    final state = await openChildHome(tester);
+  testWidgets('GPS yang lambat tidak menahan SOS lebih dari 3 detik', (
+    tester,
+  ) async {
+    final state = await openChildHome(
+      tester,
+      location: const _HangingLocation(),
+    );
     final before = panicAlerts(state);
 
     await tester.tap(orb());
-    await wait(tester, const Duration(milliseconds: 1200));
-    await tester.tap(find.text('Batalkan'));
-    await wait(tester, const Duration(seconds: 4));
+    await wait(tester, const Duration(milliseconds: 2500));
+    expect(panicAlerts(state), before, reason: 'masih menunggu lokasi');
 
-    expect(panicAlerts(state), before, reason: 'SOS yang dibatalkan terkirim');
-    expect(find.text('Panic Orb'), findsOneWidget);
-    expect(find.text('Tekan sekali untuk SOS'), findsOneWidget);
+    await wait(tester, const Duration(milliseconds: 1000));
+    expect(panicAlerts(state), before + 1, reason: 'SOS harus tetap berangkat');
+    expect(find.text('Pesan daruratmu terkirim'), findsOneWidget);
+    expect(find.textContaining('sinyal GPS belum didapat'), findsOneWidget);
   });
 
   testWidgets('lembar konfirmasi menyebut lokasi ikut terkirim', (
@@ -253,25 +249,22 @@ void main() {
     expect(find.textContaining('kabari orang tuamu'), findsOneWidget);
   });
 
-  testWidgets('ketukan kedua saat hitung mundur langsung mengirim', (
-    tester,
-  ) async {
-    // Anak yang panik sering mengetuk berulang kali; jangan buat mereka
-    // menunggu sisa hitung mundur.
+  testWidgets('ketukan berulang hanya mengirim satu SOS', (tester) async {
+    // Anak yang panik sering mengetuk berulang kali; orang tuanya tidak boleh
+    // menerima peringatan berlipat.
     final state = await openChildHome(tester);
     final before = panicAlerts(state);
 
-    await tester.tap(orb());
-    await tester.pump(const Duration(milliseconds: 300));
-
-    // Saat menghitung mundur, pembaca layar harus tahu bahwa mengetuk lagi
-    // berarti kirim sekarang.
-    final sendNow = find.bySemanticsLabel(RegExp(r'^Kirim SOS sekarang'));
-    expect(sendNow, findsOneWidget);
-    await tester.tap(sendNow);
+    for (var i = 0; i < 4; i++) {
+      // warnIfMissed: ketukan berikutnya mendarat di lembar konfirmasi,
+      // memang itu yang diuji.
+      await tester.tap(orb(), warnIfMissed: false);
+      await tester.pump(const Duration(milliseconds: 150));
+    }
     await wait(tester, const Duration(milliseconds: 600));
 
     expect(panicAlerts(state), before + 1);
+    // Lembar konfirmasinya tetap terbuka dan terbaca.
     expect(find.text('Pesan daruratmu terkirim'), findsOneWidget);
   });
 
@@ -287,7 +280,7 @@ void main() {
     final state = AppState(
       repository: DemoRepository(),
       locationService: _FakeLocation.found(),
-      callService: _FakeCall(),
+      callService: _FakeDialer(),
     );
     addTearDown(state.dispose);
 
@@ -321,98 +314,7 @@ void main() {
     );
   });
 
-  group('telepon orang tua', () {
-    setUp(() => SharedPreferences.setMockInitialValues({}));
-
-    testWidgets('SOS menelepon nomor orang tua', (tester) async {
-      final call = _FakeCall();
-      await openChildHome(tester, call: call);
-
-      await tester.tap(orb());
-      await wait(tester, const Duration(milliseconds: 3600));
-
-      expect(call.dialled, ['+6281234567890']);
-      expect(find.text('Kami sudah menelepon orang tuamu.'), findsOneWidget);
-      expect(find.text('Pesan daruratmu terkirim'), findsOneWidget);
-    });
-
-    testWidgets('tanpa internet: tetap menelepon dan jujur soal peringatan', (
-      tester,
-    ) async {
-      // Justru di sini telepon paling berguna: lewat jaringan seluler, tidak
-      // butuh internet. Dulu layar juga macet di "Mengirim SOS...".
-      final call = _FakeCall();
-      await openChildHome(tester, call: call, repository: _OfflineRepository());
-
-      await tester.tap(orb());
-      await wait(tester, const Duration(milliseconds: 3600));
-
-      expect(call.dialled, hasLength(1), reason: 'telepon harus tetap jalan');
-      expect(find.text('Peringatan belum terkirim'), findsOneWidget);
-      expect(find.text('Mengirim SOS...'), findsNothing);
-      expect(
-        find.textContaining('Sebutkan kamu di mana'),
-        findsOneWidget,
-        reason: 'lokasi tidak boleh diklaim terkirim',
-      );
-    });
-
-    testWidgets('tanpa nomor: tidak menelepon dan mengatakannya', (
-      tester,
-    ) async {
-      final call = _FakeCall();
-      await openChildHome(
-        tester,
-        call: call,
-        repository: _NoNumberRepository(),
-      );
-
-      await tester.tap(orb());
-      await wait(tester, const Duration(milliseconds: 3600));
-
-      expect(call.dialled, [null]);
-      expect(find.textContaining('belum diisi'), findsOneWidget);
-      expect(find.text('Telepon orang tua lagi'), findsNothing);
-    });
-
-    testWidgets('SOS yang dibatalkan tidak menelepon', (tester) async {
-      final call = _FakeCall();
-      await openChildHome(tester, call: call);
-
-      await tester.tap(orb());
-      await wait(tester, const Duration(milliseconds: 1000));
-      await tester.tap(find.text('Batalkan'));
-      await wait(tester, const Duration(seconds: 4));
-
-      expect(call.dialled, isEmpty);
-    });
-
-    testWidgets('telepon yang tak pernah menjawab tidak membuat layar macet', (
-      tester,
-    ) async {
-      await openChildHome(tester, call: const _HangingCall());
-
-      await tester.tap(orb());
-      await wait(tester, const Duration(seconds: 10));
-
-      expect(find.text('Mengirim SOS...'), findsNothing);
-      expect(find.text('Pesan daruratmu terkirim'), findsOneWidget);
-    });
-
-    testWidgets('tanpa izin telepon: aplikasi Telepon dibuka dengan nomor', (
-      tester,
-    ) async {
-      await openChildHome(tester, call: _FakeCall(CallOutcome.dialerOpened));
-
-      await tester.tap(orb());
-      await wait(tester, const Duration(milliseconds: 3600));
-
-      expect(find.textContaining('tombol panggil hijau'), findsOneWidget);
-      expect(find.text('Kami sudah menelepon orang tuamu.'), findsNothing);
-    });
-  });
-
-  group('telepon lewat WhatsApp', () {
+  group('alarm di HP orang tua', () {
     setUp(() => SharedPreferences.setMockInitialValues({}));
 
     Future<void> sendSos(WidgetTester tester) async {
@@ -420,159 +322,110 @@ void main() {
       await wait(tester, const Duration(milliseconds: 3600));
     }
 
-    testWidgets('tanpa WhatsApp: tombolnya tidak muncul', (tester) async {
-      await openChildHome(tester, call: _FakeCall());
+    testWidgets('SOS tidak menelepon: HP orang tua yang berbunyi', (
+      tester,
+    ) async {
+      final dialer = _FakeDialer();
+      await openChildHome(tester, dialer: dialer);
       await sendSos(tester);
 
+      expect(dialer.opened, isEmpty, reason: 'HP anak tidak boleh menelepon');
       expect(find.text('Pesan daruratmu terkirim'), findsOneWidget);
-      expect(find.text('Telepon lewat WhatsApp'), findsNothing);
+      expect(find.textContaining('akan berbunyi alarm'), findsOneWidget);
+      // Tombol cadangan hanya untuk SOS yang gagal terkirim.
+      expect(find.text('Telepon orang tua'), findsNothing);
+      expect(find.text('Coba kirim lagi'), findsNothing);
     });
 
-    testWidgets('anak menelepon orang tua lewat WhatsApp dari lembar SOS', (
+    testWidgets('tanpa internet: jujur, lalu anak bisa menelepon orang tua', (
       tester,
     ) async {
-      final call = _FakeCall(CallOutcome.called, WhatsAppCallOutcome.called);
-      await openChildHome(tester, call: call);
-      await sendSos(tester);
-
-      // Telepon seluler tetap jalur utama; WhatsApp hanya bila diminta.
-      expect(call.dialled, ['+6281234567890']);
-      expect(call.whatsAppDialled, isEmpty);
-
-      await tester.tap(find.text('Telepon lewat WhatsApp'));
-      await wait(tester, const Duration(milliseconds: 300));
-
-      expect(call.whatsAppDialled, ['+6281234567890']);
-      expect(
-        find.text('Kami sudah menelepon orang tuamu lewat WhatsApp.'),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets('nomor tidak ada di Kontak: chat dibuka, anak diberi tahu', (
-      tester,
-    ) async {
+      // Alarm butuh internet. Telepon seluler tidak, jadi itulah jalan
+      // cadangannya. Dulu layar juga macet di "Mengirim SOS...".
+      final dialer = _FakeDialer();
       await openChildHome(
         tester,
-        call: _FakeCall(CallOutcome.called, WhatsAppCallOutcome.chatOpened),
-      );
-      await sendSos(tester);
-      await tester.tap(find.text('Telepon lewat WhatsApp'));
-      await wait(tester, const Duration(milliseconds: 300));
-
-      expect(find.textContaining('Tekan ikon telepon'), findsOneWidget);
-      expect(find.textContaining('lewat WhatsApp.'), findsNothing);
-    });
-
-    testWidgets('tanpa internet: tidak mengaku panggilan WhatsApp pasti masuk', (
-      tester,
-    ) async {
-      await openChildHome(
-        tester,
-        call: _FakeCall(CallOutcome.called, WhatsAppCallOutcome.called),
+        dialer: dialer,
         repository: _OfflineRepository(),
       );
       await sendSos(tester);
-      await tester.tap(find.text('Telepon lewat WhatsApp'));
+
+      expect(find.text('Peringatan belum terkirim'), findsOneWidget);
+      expect(find.text('Mengirim SOS...'), findsNothing);
+      expect(
+        find.textContaining('belum berbunyi'),
+        findsOneWidget,
+        reason: 'anak tidak boleh mengira orang tuanya sudah tahu',
+      );
+      expect(
+        find.textContaining('sebutkan kamu di mana'),
+        findsOneWidget,
+        reason: 'lokasi tidak boleh diklaim terkirim',
+      );
+      expect(dialer.opened, isEmpty, reason: 'telepon hanya bila diminta');
+
+      await tester.tap(find.text('Telepon orang tua'));
       await wait(tester, const Duration(milliseconds: 300));
 
-      expect(find.textContaining('internet sepertinya'), findsOneWidget);
-      expect(
-        find.text('Kami sudah menelepon orang tuamu lewat WhatsApp.'),
-        findsNothing,
-      );
+      expect(dialer.opened, ['+6281234567890']);
+      expect(find.textContaining('tombol panggil hijau'), findsOneWidget);
     });
 
-    testWidgets('perangkat tanpa SIM diarahkan ke tombol WhatsApp', (
+    testWidgets('Coba kirim lagi: SOS terkirim begitu internet kembali', (
+      tester,
+    ) async {
+      final repository = _OfflineRepository();
+      final state = await openChildHome(tester, repository: repository);
+      final before = panicAlerts(state);
+      await sendSos(tester);
+      expect(find.text('Peringatan belum terkirim'), findsOneWidget);
+
+      repository.online = true;
+      await tester.tap(find.text('Coba kirim lagi'));
+      await wait(tester, const Duration(milliseconds: 600));
+
+      expect(panicAlerts(state), before + 1);
+      expect(find.text('Pesan daruratmu terkirim'), findsOneWidget);
+      expect(find.textContaining('akan berbunyi alarm'), findsOneWidget);
+      expect(find.text('Coba kirim lagi'), findsNothing);
+    });
+
+    testWidgets('tanpa internet dan tanpa nomor: tidak ada tombol telepon', (
+      tester,
+    ) async {
+      await openChildHome(tester, repository: _OfflineNoNumberRepository());
+      await sendSos(tester);
+
+      expect(find.text('Peringatan belum terkirim'), findsOneWidget);
+      expect(find.text('Telepon orang tua'), findsNothing);
+      expect(find.textContaining('orang dewasa di dekatmu'), findsOneWidget);
+      expect(find.text('Coba kirim lagi'), findsOneWidget);
+    });
+
+    testWidgets('tablet tanpa SIM: anak diarahkan ke orang dewasa', (
       tester,
     ) async {
       await openChildHome(
         tester,
-        call: _FakeCall(CallOutcome.failed, WhatsAppCallOutcome.called),
+        dialer: _FakeDialer(opens: false),
+        repository: _OfflineRepository(),
       );
       await sendSos(tester);
-
-      expect(find.textContaining('lewat WhatsApp di bawah'), findsOneWidget);
-      expect(find.text('Telepon lewat WhatsApp'), findsOneWidget);
-    });
-  });
-
-  group('WhatsApp langsung menelepon', () {
-    setUp(() => SharedPreferences.setMockInitialValues({}));
-
-    Future<void> openSettings(WidgetTester tester) async {
-      await tester.tap(find.bySemanticsLabel('Pusat bantuan'));
-      await wait(tester, const Duration(milliseconds: 600));
-      await tester.tap(find.text('Pengaturan'));
-      await wait(tester, const Duration(milliseconds: 600));
-    }
-
-    Future<void> tapText(WidgetTester tester, String text) async {
-      await tester.ensureVisible(find.text(text));
-      await tester.pump(const Duration(milliseconds: 300));
-      await tester.tap(find.text(text));
+      await tester.tap(find.text('Telepon orang tua'));
       await wait(tester, const Duration(milliseconds: 300));
-    }
 
-    testWidgets('nomor orang tua disimpan ke Kontak begitu tertaut', (
-      tester,
-    ) async {
-      // Disimpan jauh sebelum darurat, supaya WhatsApp sempat mengenalinya.
-      final call = _FakeCall(CallOutcome.called, WhatsAppCallOutcome.called)
-        ..contactsAllowed = true;
-      await openChildHome(tester, call: call);
-
-      expect(call.savedContacts, ['+6281234567890']);
-      expect(call.whatsAppReady, isTrue);
+      expect(find.textContaining('tidak bisa menelepon'), findsOneWidget);
     });
 
-    testWidgets('Pengaturan: belum siap, lalu Siapkan membuatnya siap', (
+    testWidgets('jaringan yang tak pernah menjawab tidak membuat layar macet', (
       tester,
     ) async {
-      // Ponsel yang memberi persetujuan sebelum fitur ini ada: izin Kontak
-      // belum pernah diminta.
-      final call = _FakeCall(CallOutcome.called, WhatsAppCallOutcome.called);
-      await openChildHome(tester, call: call);
-      await openSettings(tester);
+      await openChildHome(tester, repository: _HangingRepository());
+      await tester.tap(orb());
+      await wait(tester, const Duration(seconds: 14));
 
-      expect(find.text('Telepon WhatsApp'), findsOneWidget);
-      expect(find.textContaining('baru membuka chat'), findsOneWidget);
-
-      await tapText(tester, 'Siapkan');
-
-      expect(call.permissionRequests, 1);
-      expect(call.savedContacts.last, '+6281234567890');
-      expect(find.text('Siap, langsung menelepon'), findsOneWidget);
-    });
-
-    testWidgets('Pengaturan: kontak tersimpan tapi WhatsApp belum mengenalinya', (
-      tester,
-    ) async {
-      final call = _FakeCall(CallOutcome.called, WhatsAppCallOutcome.called)
-        ..syncsInstantly = false;
-      await openChildHome(tester, call: call);
-      await openSettings(tester);
-      await tapText(tester, 'Siapkan');
-
-      // Jujur: belum siap sampai WhatsApp benar-benar mengenali nomornya.
-      expect(find.textContaining('Buka WhatsApp sekali'), findsOneWidget);
-      expect(find.text('Siap, langsung menelepon'), findsNothing);
-
-      call.whatsAppReady = true;
-      await tapText(tester, 'Periksa lagi');
-      expect(find.text('Siap, langsung menelepon'), findsOneWidget);
-    });
-
-    testWidgets('tanpa WhatsApp: tidak ada baris dan tidak ada kontak', (
-      tester,
-    ) async {
-      final call = _FakeCall()..contactsAllowed = true;
-      await openChildHome(tester, call: call);
-      await openSettings(tester);
-
-      expect(find.text('Ditelepon saat darurat'), findsOneWidget);
-      expect(find.text('Telepon WhatsApp'), findsNothing);
-      expect(call.whatsAppReady, isFalse);
+      expect(find.text('Mengirim SOS...'), findsNothing);
+      expect(find.text('Peringatan belum terkirim'), findsOneWidget);
     });
   });
 
@@ -586,7 +439,7 @@ void main() {
     await tester.tap(find.text('Pengaturan'));
     await wait(tester, const Duration(milliseconds: 600));
 
-    expect(find.text('Ditelepon saat darurat'), findsOneWidget);
+    expect(find.text('Nomor orang tua'), findsOneWidget);
     // Daftar hanya membangun yang dekat layar; gulir dulu sampai tombolnya
     // ada, lalu pastikan seluruhnya terlihat.
     await tester.scrollUntilVisible(

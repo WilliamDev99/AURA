@@ -24,6 +24,10 @@ class AuraNotificationListener : NotificationListenerService() {
         // Supabase tersambung.
         runCatching { AuraEngine.reportAccess(this, enabled = true) }
             .onFailure { Log.e(TAG, "Mesin pemindai gagal disiapkan", it) }
+        // Layanan ini dijaga hidup oleh Android, jadi pengunci jam istirahat
+        // menumpang di sini.
+        runCatching { ScreenLock.start(this) }
+            .onFailure { Log.e(TAG, "Jam istirahat gagal dimulai", it) }
     }
 
     /**
@@ -34,6 +38,12 @@ class AuraNotificationListener : NotificationListenerService() {
         Log.i(TAG, "Akses notifikasi terputus")
         runCatching { AuraEngine.reportAccess(this, enabled = false) }
             .onFailure { Log.e(TAG, "Status pemindaian gagal dilaporkan", it) }
+        ScreenLock.stop()
+    }
+
+    override fun onDestroy() {
+        ScreenLock.stop()
+        super.onDestroy()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {

@@ -296,7 +296,18 @@ void main() {
       tester.widget<Text>(find.text('Ayu').last).style?.color,
       ClayColors.ink,
     );
-    await tester.tap(find.byType(Switch));
+    // Sakelar perlindungan, bukan sakelar jam istirahat di bawahnya.
+    await tester.tap(
+      find.descendant(
+        of: find
+            .ancestor(
+              of: find.text('Perlindungan aktif'),
+              matching: find.byType(Row),
+            )
+            .first,
+        matching: find.byType(Switch),
+      ),
+    );
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(

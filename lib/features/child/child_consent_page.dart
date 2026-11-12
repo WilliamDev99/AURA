@@ -53,17 +53,29 @@ class _ChildConsentPageState extends State<ChildConsentPage> {
       ),
     ),
     (
-      Icons.call_rounded,
-      tr('Menelepon orang tuamu kalau kamu menekan tombol darurat'),
+      Icons.alarm_rounded,
       tr(
-        'Supaya orang tuamu bisa langsung bicara denganmu. Tetap jalan '
-        'walau internet sedang mati. Kalau ponselmu tidak punya pulsa, kamu '
-        'juga bisa menelepon lewat WhatsApp; untuk itu AURA menyimpan nomor '
-        'orang tuamu di Kontak kalau belum ada. Kontak lain tidak diubah, '
-        'dibaca, atau dikirim ke mana pun.',
+        'Membunyikan alarm di HP orang tuamu kalau kamu menekan tombol darurat',
+      ),
+      tr(
+        'HP orang tuamu berbunyi dan bergetar terus sampai mereka '
+        'mematikannya, walau sedang dalam mode senyap. Ponselmu sendiri '
+        'tidak berbunyi. Alarm butuh internet; kalau internetmu mati, kamu '
+        'bisa menelepon orang tuamu dari layar yang sama.',
       ),
     ),
   ];
+
+  /// Selalu ditampilkan: orang tua bisa menyalakan jam istirahat kapan saja.
+  static (IconData, String, String) get _lockItem => (
+    Icons.bedtime_rounded,
+    tr('Mengunci aplikasi pada jam istirahat dari orang tuamu'),
+    tr(
+      'Misalnya pukul 22.00 sampai 09.00, pada hari yang dipilih orang tuamu. '
+      'AURA, telepon, dan jam alarm tetap bisa dibuka, jadi kamu selalu bisa '
+      'minta tolong.',
+    ),
+  );
 
   /// Ditampilkan bila obrolan dengan Aura dibalas AI.
   static (IconData, String, String) get _aiItem => (
@@ -108,10 +120,6 @@ class _ChildConsentPageState extends State<ChildConsentPage> {
     // membaca penjelasannya. Meminta saat tombol darurat ditekan berarti
     // dialog sistem muncul di tengah keadaan panik dan menunda pertolongan.
     await state.locationService.requestPermission();
-    await state.callService.requestPermission();
-    // Disimpan sekarang, bukan saat darurat: WhatsApp butuh waktu untuk
-    // mengenali kontak baru sebelum bisa langsung meneleponnya.
-    await state.saveParentContactForWhatsApp();
 
     // Akses notifikasi tidak punya dialog izin; harus dinyalakan sendiri di
     // Pengaturan Android. Tanpanya pesan masuk tidak terpindai, jadi anak
@@ -196,6 +204,7 @@ class _ChildConsentPageState extends State<ChildConsentPage> {
                           color: AuraColors.cyan,
                           items: [
                             ..._does,
+                            _lockItem,
                             if (context.watch<AppState>().usesAiChat) _aiItem,
                           ],
                         ),

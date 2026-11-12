@@ -105,7 +105,7 @@ class LocationService {
   /// `Geolocator.getCurrentPosition`, yang di geolocator_android 5.1.1 selalu
   /// mendaftarkan pendengar NMEA lewat panggilan binder di thread utama. Saat
   /// layanan GPS sistem tidak menjawab, seluruh aplikasi membeku — persis di
-  /// tengah hitung mundur SOS.
+  /// tengah pengiriman SOS.
   static const _native = MethodChannel('id.aura/sos');
 
   bool get _useNative =>

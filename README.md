@@ -22,7 +22,7 @@ yang dikumpulkan diam-diam lebih mudah dipatahkan di persidangan.
 | Mengirim kategori risiko + kutipan pemicu ke orang tua | Mengirim seluruh isi percakapan harian |
 | Menampilkan indikator "perlindungan aktif" permanen | Menyembunyikan ikon aplikasi |
 | Mengambil lokasi saat anak menekan tombol darurat | Melacak lokasi terus-menerus tanpa sepengetahuan anak |
-| Menelepon orang tua saat anak menekan tombol darurat | Merekam suara di sekitar anak |
+| Membunyikan alarm di HP orang tua saat anak menekan tombol darurat | Merekam suara di sekitar anak |
 | Menyimpan bukti yang tak bisa diubah siapa pun | Membiarkan bukti diedit atau dihapus |
 
 Ruang curhat anak dengan AI Guardian **tidak bisa dibaca orang tua** — hanya
@@ -104,10 +104,12 @@ transaksi agar dua bukti yang masuk bersamaan tidak memakai nomor urut yang sama
 ```
 HP anak                    backend                      HP orang tua
  deteksi ancaman  ──►  tabel alerts (baris baru)
-                              │
+ atau tombol SOS              │
                               ▼
                        notify-parents  ──► FCM ──►  notifikasi muncul
-                      (Edge Function)              ketuk ──► rincian
+                      (Edge Function)              (SOS: alarm berbunyi
+                                                    sampai dimatikan)
+                                                   ketuk ──► rincian
 ```
 
 Perangkat orang tua mendaftarkan dirinya saat masuk
@@ -121,35 +123,95 @@ perangkat Android. Jadi Supabase memegang basis data dan server, FCM hanya
 bertugas sebagai kurir. Keduanya gratis: yang menuntut kartu kredit adalah
 Cloud Functions milik Firebase, dan Edge Function menggantikan peran itu.
 
-### Tombol darurat menelepon orang tua
+### Tombol darurat membunyikan alarm di HP orang tua
 
-Saat anak menekan Panic Orb, setelah hitung mundur 3 detik, AURA mengirim
-peringatan beserta lokasi **dan sekaligus menelepon HP orang tua** lewat
-jaringan seluler biasa
-([emergency_call_service.dart](lib/domain/services/emergency_call_service.dart)).
+Saat anak menekan Panic Orb, SOS **langsung terkirim, tanpa hitung mundur**.
+**HP setiap orang tua di keluarga itu lalu berbunyi alarm dan bergetar terus
+sampai dimatikan.** HP anak sendiri tidak berbunyi, tidak menelepon, dan tidak
+mengirim SMS.
 
-- Nomor diisi orang tua saat masuk, lalu disimpan di HP anak
-  (`shared_preferences`). Jadi telepon tetap jalan **tanpa internet**, justru
-  saat peringatan lewat Supabase tidak bisa terkirim.
-- Izin `CALL_PHONE` diminta di layar persetujuan anak, bukan saat darurat.
-  Tanpa izin itu, aplikasi Telepon dibuka dengan nomor sudah terisi.
-- Lembar konfirmasi jujur: menyebut apakah peringatan, lokasi, dan telepon
-  benar-benar berhasil. Anak tidak boleh mengira orang tuanya sudah tahu
-  padahal belum.
-- **Telepon lewat WhatsApp.** Bila WhatsApp terpasang, lembar konfirmasi
-  punya tombol "Telepon lewat WhatsApp", untuk HP tanpa pulsa atau tablet
-  tanpa SIM selama ada internet. Telepon seluler tetap jalur utama; WhatsApp
-  hanya saat anak menekannya. WhatsApp tidak punya cara resmi untuk memulai
-  panggilan dari aplikasi lain, jadi AURA membuka baris "Panggilan suara"
-  yang WhatsApp tambahkan ke Kontak
-  ([WhatsAppContact.kt](android/app/src/main/kotlin/id/aura/aura/WhatsAppContact.kt)).
-  Baris itu hanya ada untuk nomor yang tersimpan di Kontak, jadi AURA
-  **menyimpan nomor orang tua ke Kontak** perangkat anak bila belum ada (saat
-  persetujuan dan setiap kali nomornya berganti), jauh sebelum darurat supaya
-  WhatsApp sempat mengenalinya. Izin Kontak diminta di layar persetujuan,
-  hanya bila WhatsApp terpasang. Pengaturan anak menampilkan baris "Telepon
-  WhatsApp": siap langsung menelepon, atau tombol "Siapkan". Selama belum
-  siap, tombol saat SOS membuka chat WhatsApp orang tua.
+- Peringatan, lokasi, dan bukti tersegel masuk ke Supabase; `notify-parents`
+  mengirim pesan FCM berprioritas tinggi berisi data saja. Di HP orang tua,
+  [SosPushReceiver.kt](android/app/src/main/kotlin/id/aura/aura/SosPushReceiver.kt)
+  langsung membunyikan alarm, tanpa menunggu Flutter, dan hanya bila ID
+  keluarganya cocok dengan keluarga orang tua di HP itu.
+- **Diputar seperti jam alarm**:
+  [SosAlarmService.kt](android/app/src/main/kotlin/id/aura/aura/SosAlarmService.kt)
+  memutar sirene buatan AURA
+  ([aura_sos_alarm.wav](android/app/src/main/res/raw/aura_sos_alarm.wav)) lewat
+  **volume alarm**, jadi tetap berbunyi dalam mode senyap. Suara notifikasi
+  biasa sengaja tidak dipakai: Android hanya memutar satu suara notifikasi dalam
+  satu waktu, dan di emulator terbukti SMS yang masuk langsung membungkamnya.
+- Notifikasinya punya tombol **Matikan alarm** yang bisa ditekan dari layar
+  kunci. Mengetuk notifikasinya membuka rincian SOS dan mematikan alarm; selama
+  alarm berbunyi, AURA juga menampilkan kartu merah "Matikan alarm".
+- Pesan yang sama yang terantar dua kali tidak membunyikan lagi alarm yang
+  sudah dimatikan.
+- Orang tua bisa mencoba bunyinya kapan saja: **Profil → Alarm SOS → Coba
+  bunyikan**.
+- Alarm butuh internet. Bila peringatan tidak terkirim, lembar SOS di HP anak
+  mengatakannya terus terang dan memberi tombol **Coba kirim lagi** serta
+  **Telepon orang tua**, yang membuka aplikasi Telepon dengan nomor orang tua
+  sudah terisi
+  ([emergency_call_service.dart](lib/domain/services/emergency_call_service.dart)).
+  Lembar itu hanya bisa ditutup lewat tombolnya, supaya ketukan beruntun anak
+  yang panik tidak menutupnya tanpa terbaca lalu mengirim SOS lagi.
+
+AURA juga **bisa dibuka tanpa internet**: profil terakhir disimpan di HP, jadi
+anak tetap sampai ke tombol SOS dan tombol "Telepon orang tua". Di HP orang
+tua, selama data keluarga belum termuat, beranda menulis "Menunggu internet",
+bukan "aman". Profil itu baru tersimpan setelah AURA sekali dibuka dengan
+internet.
+
+AURA tidak meminta izin `CALL_PHONE`, izin Kontak, maupun izin SMS.
+
+### Jam istirahat
+
+Orang tua mengatur jam istirahat per anak dari lembar rincian anak (ketuk
+nama anak di beranda): jam mulai, jam selesai (bawaan 22.00 sampai 09.00), dan
+harinya. Selama jam itu **semua aplikasi di HP anak terkunci**; AURA (tombol
+SOS), telepon, jam alarm, dan layar utama tetap bisa dibuka, supaya anak selalu
+bisa minta tolong dan alarm paginya bisa dimatikan. Pengaturan Android ikut
+terkunci, supaya izin AURA tidak bisa dimatikan di malam hari.
+
+- Hari adalah malam mulainya kunci: Senin 22.00 sampai Selasa 09.00 termasuk
+  hari Senin ([lock_schedule.dart](lib/domain/models/lock_schedule.dart), aturan
+  yang sama di [LockSchedule.kt](android/app/src/main/kotlin/id/aura/aura/LockSchedule.kt)).
+- Pengunci di HP anak
+  ([ScreenLock.kt](android/app/src/main/kotlin/id/aura/aura/ScreenLock.kt))
+  menumpang di layanan pemindai pesan, jadi tetap jalan saat AURA tertutup dan
+  tanpa internet: jadwalnya disimpan di HP anak. Aplikasi yang dibuka saat jam
+  istirahat langsung ditutup lapisan "Jam istirahat" (diperiksa tiap setengah
+  detik, dan saat layar dinyalakan), lalu digantikan layar penuh
+  ([RestLock.kt](android/app/src/main/kotlin/id/aura/aura/RestLock.kt)) supaya
+  aplikasinya berhenti: video dan game tidak terus bersuara di belakangnya.
+- Yang tetap bisa dibuka sengaja sempit: aplikasi Telepon bawaan, jam alarm
+  bawaan sistem, layar utama yang sedang dipakai, keyboard, dan konfirmasi
+  pemasangan aplikasi. Menanyakan "semua aplikasi yang bisa menelepon"
+  ikut meloloskan Zoom, dan "semua layar utama" ikut meloloskan Pengaturan
+  Android (FallbackHome).
+- Pengunci berjalan di thread sendiri, bukan thread utama yang juga dipakai
+  Dart, jadi tidak tertunda saat Dart sibuk. Di HP anak, AURA tidak tampil di
+  daftar aplikasi terbaru supaya "Bersihkan semua" di Realme/OPPO tidak
+  mematikannya. Bila sistem tetap mematikannya, penjaga cadangan
+  ([LockWatchdog.kt](android/app/src/main/kotlin/id/aura/aura/LockWatchdog.kt),
+  JobScheduler) menghidupkan pengunci lagi dalam beberapa detik.
+- Anak memberi tiga izin di **Pengaturan → Jam istirahat**: "Akses penggunaan",
+  "Tampil di atas aplikasi lain", dan "Tetap aktif di latar belakang". Yang
+  terakhir penting di Realme, OPPO, dan OnePlus: tanpanya, sistem mematikan
+  AURA saat daftar aplikasi terbaru dibersihkan atau mode game menyala, dan
+  selama itu tidak ada yang mengunci. HP anak melaporkan statusnya; orang tua
+  melihat "Belum siap" selama izin itu belum lengkap.
+- Sakelar di kartu "Jam istirahat" langsung berlaku, seperti sakelar
+  perlindungan, dan sampai di HP anak dalam hitungan detik lewat realtime.
+  Supaya realtime tidak mati, HP anak tetap memperbarui token loginnya walau
+  AURA berjalan tanpa layar (supabase_flutter menghentikannya begitu aplikasi
+  tidak tampil). Pengunci memeriksa saat itu juga begitu jadwal baru tersimpan.
+  Sebagai cadangan, profil diambil ulang saat layar HP anak menyala dan tiap
+  menit ([row_poller.dart](lib/core/utils/row_poller.dart)).
+- Hanya orang tua yang bisa mengubah jadwalnya. Ini dijaga di basis data
+  ([patch_06_lock_schedule.sql](supabase/patch_06_lock_schedule.sql)), bukan
+  hanya di tampilan.
 
 ### Pemindaian chat masuk
 
@@ -286,13 +348,15 @@ demo, yang terlihat di log sebagai
    Project yang dibuat lebih awal cukup menjalankan patch yang belum
    dijalankan, berurutan:
    [patch_02_parent_phone.sql](supabase/patch_02_parent_phone.sql) (nomor HP
-   orang tua untuk telepon darurat),
+   orang tua, cadangan bila SOS anak tidak terkirim),
    [patch_03_chat_scan_status.sql](supabase/patch_03_chat_scan_status.sql)
    (status pemindaian chat yang terlihat di HP orang tua),
    [patch_04_profile_photo.sql](supabase/patch_04_profile_photo.sql) (foto
-   profil di bucket privat, dan penjagaan profil yang lebih ketat), dan
+   profil di bucket privat, dan penjagaan profil yang lebih ketat),
    [patch_05_fix_avatar_read.sql](supabase/patch_05_fix_avatar_read.sql)
-   (perbaikan aturan baca foto untuk yang sudah menjalankan patch 04).
+   (perbaikan aturan baca foto untuk yang sudah menjalankan patch 04), dan
+   [patch_06_lock_schedule.sql](supabase/patch_06_lock_schedule.sql) (jam
+   istirahat).
 3. Buka **Authentication → Providers → Anonymous**, nyalakan. Ini untuk
    ponsel anak, yang ditautkan lewat kode keluarga.
 4. Buka **Project Settings → API**, salin *Project URL* dan *Publishable key*
@@ -369,7 +433,7 @@ Judul dan bunyi notifikasi (`pushMessageFor`):
 
 | Peringatan | Judul | Kanal |
 |---|---|---|
-| Tombol SOS | Darurat: {anak} menekan tombol SOS | Darurat (mendesak) |
+| Tombol SOS | Darurat: {anak} menekan tombol SOS | Alarm SOS dari aplikasi (pesan data saja; berbunyi sampai dimatikan) |
 | HARD, ancaman serius | Darurat: {anak} butuh bantuan | Darurat (mendesak) |
 | HARD, kata kasar saja | HARD: {anak} menerima kata kasar berat | biasa |
 | MEDIUM | MEDIUM: {anak} menerima pesan berisiko | biasa |
@@ -453,8 +517,8 @@ minimal 1024 piksel; gambar sekarang 540 × 540.
 ## Pengujian
 
 ```bash
-flutter test          # 482 test
-cd android && ./gradlew :app:testDebugUnitTest   # 13 test Kotlin (saringan kanal, judul notifikasi, kontak WhatsApp)
+flutter test          # 524 test
+cd android && ./gradlew :app:testDebugUnitTest   # 17 test Kotlin (saringan kanal, judul notifikasi, ID SOS, jam istirahat)
 cd functions && npm run build
 ```
 
@@ -465,7 +529,9 @@ cd functions && npm run build
 | `test/app_state_test.dart` | Alur ujung-ke-ujung: pemindaian, laporan anak, tombol darurat, eskalasi dari obrolan AI |
 | `test/app_smoke_test.dart` | Render UI dan perpindahan antar-peran |
 | `test/resilient_stream_test.dart` | Langganan realtime pulih sendiri setelah token kedaluwarsa atau jaringan putus |
-| `test/panic_countdown_test.dart` | Panic Orb: terkirim setelah 3 detik, bisa dibatalkan, ketukan kedua langsung mengirim; menelepon orang tua, termasuk tanpa internet, tanpa nomor, dan tanpa izin telepon |
+| `test/panic_countdown_test.dart` | Panic Orb: satu ketukan langsung mengirim, GPS lambat tidak menahan lebih dari 3 detik, ketukan beruntun tetap satu SOS; tidak menelepon; tanpa internet: jujur, Coba kirim lagi, dan Telepon orang tua sebagai cadangan |
+| `test/lock_schedule_test.dart` | Jam istirahat: kapan terkunci (melewati tengah malam, hari mulainya kunci), simpanan yang dibaca Android, jadwal tersimpan di HP anak, pengaturan orang tua (roda gulir jam), izin tetap aktif di latar belakang, layar kunci penuh |
+| `test/sos_alarm_test.dart` | Alarm SOS di HP orang tua: diputar layanan alarm lewat volume alarm, getar berulang, tombol Matikan alarm, sekali untuk SOS yang sama, keluarga yang cocok, sejalan dengan notify-parents; kartu alarm di layar |
 | `test/notification_scanner_test.dart` | Pesan dari notifikasi: berbahaya diteruskan, aman tidak, tanpa duplikat, berhenti saat dijeda |
 | `test/alert_handled_test.dart` | Konfirmasi "sudah ditangani" dan hilangnya peringatan dari dashboard |
 | `test/geo_point_test.dart` | Pembacaan koordinat dari bukti lokasi, peta tetap tampil tanpa internet, tombol zoom, peta bisa digeser |
@@ -482,8 +548,12 @@ Ini MVP; sebelum dipakai keluarga sungguhan, bagian berikut perlu diselesaikan:
 - **Autentikasi sungguhan.** Masuk saat ini memakai nama + anonymous auth. Ganti
   dengan surel/sandi atau nomor telepon untuk orang tua.
 - **Enkripsi ujung-ke-ujung** untuk isi bukti sebelum diunggah.
-- **Kepastian telepon diangkat.** Android tidak memberi tahu aplikasi apakah
-  panggilan dijawab, jadi AURA belum bisa beralih otomatis ke orang tua kedua.
+- **Layanan alarm untuk Play Store.** Layanan latar depan `mediaPlayback`
+  yang memutar alarm SOS perlu dijelaskan di Play Console.
+- **Alarm SOS layar penuh.** Alarm muncul sebagai notifikasi yang berbunyi
+  berulang, belum sebagai layar penuh di atas layar kunci seperti jam alarm.
+  Izin `USE_FULL_SCREEN_INTENT` dibatasi Play Store untuk aplikasi telepon dan
+  jam alarm, jadi perlu deklarasi khusus sebelum dipakai.
 - **Penyedia ubin peta.** Peta memakai server ubin publik OpenStreetMap, yang
   hanya boleh untuk pemakaian ringan. Sebelum rilis, pindah ke penyedia dengan
   paket gratis/berbayar (mis. MapTiler atau Stadia Maps).

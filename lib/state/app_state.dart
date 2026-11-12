@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -9,6 +10,7 @@ import '../data/aura_repository.dart';
 import '../domain/models/app_user.dart';
 import '../domain/models/evidence_item.dart';
 import '../domain/models/guardian_message.dart';
+import '../domain/models/lock_schedule.dart';
 import '../domain/models/risk.dart';
 import '../domain/models/threat_alert.dart';
 import '../domain/services/chain_of_custody.dart';
@@ -16,6 +18,7 @@ import '../domain/services/emergency_call_service.dart';
 import '../domain/services/guardian_brain.dart';
 import '../domain/services/location_service.dart';
 import '../domain/services/notification_access.dart';
+import '../domain/services/screen_lock_access.dart';
 import '../domain/services/threat_analyzer.dart';
 import '../core/l10n/l10n.dart';
 
@@ -38,6 +41,7 @@ class AppState extends ChangeNotifier {
     this.locationService = const LocationService(),
     this.callService = const EmergencyCallService(),
     this.notificationAccess = const NotificationAccess(),
+    this.lockAccess = const ScreenLockAccess(),
     this.aiChat = aiChatEnabled,
   }) {
     _userSub = repository.watchCurrentUser().listen(
@@ -62,11 +66,19 @@ class AppState extends ChangeNotifier {
   /// Izin membaca notifikasi pesan untuk pemindaian chat di ponsel anak.
   final NotificationAccess notificationAccess;
 
-  /// Nomor orang tua yang ditelepon saat SOS, disimpan di perangkat.
+  /// Izin untuk mengunci aplikasi pada jam istirahat di ponsel anak.
+  final ScreenLockAccess lockAccess;
+
+  /// Status izin jam istirahat di ponsel ini; null bila belum/tidak bisa
+  /// diperiksa.
+  LockAccess? _lockAccessStatus;
+  LockAccess? get lockAccessStatus => _lockAccessStatus;
+
+  /// Nomor HP orang tua, disimpan di perangkat anak.
   ///
-  /// Diambil dari server saat keadaan tenang, lalu disimpan lokal, sehingga
-  /// jalur darurat tidak pernah butuh internet untuk tahu siapa yang harus
-  /// ditelepon.
+  /// Anak bisa meneleponnya bila SOS tidak terkirim karena internet mati.
+  /// Karena itu nomornya diambil dari server saat keadaan tenang lalu
+  /// disimpan lokal: justru saat internet mati nomor ini dibutuhkan.
   String? _emergencyNumber;
   String? get emergencyNumber => _emergencyNumber;
 
@@ -118,6 +130,15 @@ class AppState extends ChangeNotifier {
   List<GuardianMessage> get chat => _chat;
   bool get busy => _busy;
   String? get lastError => _lastError;
+
+  /// Peringatan keluarga sudah pernah dimuat dari server.
+  ///
+  /// AURA bisa dibuka tanpa internet (lihat profil tersimpan di
+  /// SupabaseRepository). Selama ini false, daftar yang kosong berarti
+  /// "belum dimuat", bukan "aman": layar orang tua tidak boleh menyebut anak
+  /// aman hanya karena internetnya mati.
+  bool get familyDataLoaded => _user?.familyId == null || _alertsLoaded;
+  bool _alertsLoaded = false;
 
   List<ThreatAlert> get unreadAlerts =>
       _alerts.where((a) => a.status == AlertStatus.unread).toList();
@@ -258,51 +279,39 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Menelepon orang tua dengan nomor yang tersimpan di perangkat.
-  ///
-  /// Diberi batas waktu: alur SOS menunggu hasil ini sebelum menampilkan
-  /// konfirmasi, dan jalur darurat tidak boleh macet karena satu panggilan
-  /// yang tidak pernah menjawab.
-  Future<CallOutcome> callParent() => callService
-      .call(_emergencyNumber)
-      .timeout(const Duration(seconds: 6), onTimeout: () => CallOutcome.failed);
+  /// Tempat HP orang tua menyimpan ID keluarganya, dibaca SosPushReceiver.kt
+  /// sebagai `flutter.aura.sos_alarm_family`.
+  static const alarmFamilyKey = 'aura.sos_alarm_family';
 
-  /// Menelepon orang tua lewat WhatsApp, dengan batas waktu yang sama.
-  Future<WhatsAppCallOutcome> callParentViaWhatsApp() => callService
-      .callViaWhatsApp(_emergencyNumber)
-      .timeout(
-        const Duration(seconds: 6),
-        onTimeout: () => WhatsAppCallOutcome.failed,
-      );
+  /// ID keluarga yang terakhir disimpan untuk penerima alarm SOS.
+  String? _savedAlarmFamily;
 
-  /// Apakah tombol "Telepon lewat WhatsApp" layak ditampilkan.
-  Future<bool> canCallParentViaWhatsApp() async {
-    if (_emergencyNumber == null) return false;
-    return callService.hasWhatsApp().timeout(
-      const Duration(seconds: 2),
-      onTimeout: () => false,
-    );
-  }
-
-  /// Menyimpan nomor orang tua di Kontak perangkat anak bila belum ada,
-  /// supaya "Telepon lewat WhatsApp" langsung menelepon tanpa anak harus
-  /// menekan ikon telepon di chat. Tanpa izin Kontak, tidak terjadi apa-apa.
-  Future<bool> saveParentContactForWhatsApp() async {
-    final number = _emergencyNumber;
-    if (number == null || !isChild) return false;
-    return callService.saveParentContact(number, name: tr('Orang Tua (AURA)'));
-  }
-
-  /// Untuk baris status di Pengaturan anak.
-  Future<WhatsAppCallStatus> whatsAppCallStatus() async {
-    final number = _emergencyNumber;
-    if (number == null || !await callService.hasWhatsApp()) {
-      return WhatsAppCallStatus.unavailable;
+  /// HP orang tua membunyikan alarm SOS hanya untuk keluarganya sendiri.
+  /// Penerima pesannya berjalan di luar Flutter (SosPushReceiver.kt), jadi
+  /// ID keluarganya disimpan di penyimpanan yang bisa dibacanya. HP anak dan
+  /// HP yang sudah keluar tidak menyimpannya, jadi tidak pernah berbunyi.
+  Future<void> _rememberAlarmFamily(AppUser? user) async {
+    final family = user == null || user.isChild ? null : user.familyId;
+    if (family == _savedAlarmFamily) return;
+    _savedAlarmFamily = family;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (family == null) {
+        await prefs.remove(alarmFamilyKey);
+      } else {
+        await prefs.setString(alarmFamilyKey, family);
+      }
+    } catch (error) {
+      debugPrint('AURA: keluarga untuk alarm SOS tidak tersimpan ($error).');
     }
-    return await callService.whatsAppCallReady(number)
-        ? WhatsAppCallStatus.ready
-        : WhatsAppCallStatus.needsSetup;
   }
+
+  /// Membuka aplikasi Telepon dengan nomor orang tua yang tersimpan, untuk
+  /// SOS yang tidak terkirim karena internet mati. Diberi batas waktu supaya
+  /// lembar SOS tidak macet bila aplikasi Telepon tidak menjawab.
+  Future<bool> dialParent() => callService
+      .openDialer(_emergencyNumber)
+      .timeout(const Duration(seconds: 6), onTimeout: () => false);
 
   Future<void> _loadCachedEmergencyNumber() async {
     try {
@@ -323,14 +332,10 @@ class AppState extends ChangeNotifier {
     try {
       final number = await repository.emergencyNumber();
       if (number == null) return;
-      final changed = number != _emergencyNumber;
       _emergencyNumber = number;
       notifyListeners();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_emergencyNumberKey, number);
-      // Nomor baru (atau pertama kali tertaut): simpan di Kontak supaya
-      // WhatsApp sempat menyinkronkannya jauh sebelum keadaan darurat.
-      if (changed) await saveParentContactForWhatsApp();
     } catch (error) {
       debugPrint('AURA: nomor darurat belum bisa diperbarui ($error).');
     }
@@ -344,10 +349,12 @@ class AppState extends ChangeNotifier {
     _children = const [];
     _chat = const [];
     // Nomor itu milik keluarga yang baru ditinggalkan. Kalau ponsel ini lalu
-    // ditautkan ke keluarga lain saat offline, SOS tidak boleh menelepon
-    // orang tua yang salah.
+    // ditautkan ke keluarga lain saat offline, anak tidak boleh diarahkan
+    // menelepon orang tua yang salah.
     _emergencyNumber = null;
     notifyListeners();
+    // HP yang sudah keluar tidak boleh lagi berbunyi untuk SOS keluarga itu.
+    await _rememberAlarmFamily(null);
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_emergencyNumberKey);
@@ -370,6 +377,69 @@ class AppState extends ChangeNotifier {
 
   Future<void> setProtectionActive(String childId, bool active) =>
       _guard(() => repository.setProtectionActive(childId, active));
+
+  /// Orang tua mengatur jam istirahat anak.
+  Future<void> setLockSchedule(String childId, LockSchedule schedule) =>
+      _guard(() => repository.setLockSchedule(childId, schedule));
+
+  /// Tempat HP anak menyimpan jam istirahatnya, dibaca ScreenLock.kt sebagai
+  /// `flutter.aura.lock_schedule`. Disimpan di HP, jadi penguncinya tetap
+  /// jalan walau HP anak tanpa internet.
+  static const lockScheduleKey = 'aura.lock_schedule';
+
+  String? _savedLockSchedule;
+
+  Future<void> _rememberLockSchedule(AppUser? user) async {
+    final schedule = user != null && user.isChild ? user.lockSchedule : null;
+    final json = schedule == null ? null : jsonEncode(schedule.toJson());
+    if (json == _savedLockSchedule) return;
+    _savedLockSchedule = json;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (json == null) {
+        await prefs.remove(lockScheduleKey);
+      } else {
+        await prefs.setString(lockScheduleKey, json);
+      }
+    } catch (error) {
+      debugPrint('AURA: jam istirahat belum tersimpan di HP ($error).');
+    }
+  }
+
+  /// HP anak mengambil ulang profilnya sekarang juga, mis. saat layarnya
+  /// baru menyala, supaya jam istirahat yang baru diubah orang tua langsung
+  /// berlaku.
+  Future<void> refreshProfile() async {
+    final user = _user;
+    if (user == null || !user.isChild) return;
+    try {
+      await repository.refreshProfile();
+    } catch (error) {
+      debugPrint('AURA: profil belum bisa diambil ulang ($error).');
+    }
+  }
+
+  /// HP anak memeriksa izin jam istirahat dan melaporkannya bila berubah,
+  /// supaya orang tua tahu jam istirahat benar-benar bisa mengunci.
+  Future<void> refreshLockAccess() async {
+    final user = _user;
+    if (user == null || !user.isChild) return;
+    final access = await lockAccess.check();
+    if (access == null) return;
+    _lockAccessStatus = access;
+    notifyListeners();
+    if (user.lockReady == access.ready) return;
+    try {
+      await repository.reportLockReady(access.ready);
+      final current = _user;
+      if (current != null && current.id == user.id) {
+        _user = current.copyWith(lockReady: access.ready);
+        notifyListeners();
+      }
+    } catch (error) {
+      debugPrint('AURA: status jam istirahat belum terkirim ($error).');
+    }
+  }
 
   Future<void> markAlert(String alertId, AlertStatus status) =>
       _guard(() => repository.updateAlertStatus(alertId, status));
@@ -449,12 +519,17 @@ class AppState extends ChangeNotifier {
     return ScanOutcome(assessment: assessment, alert: alert);
   }
 
+  /// ID untuk satu kali SOS. HP orang tua memakainya untuk tidak
+  /// membunyikan alarm dua kali bila pesan yang sama terantar dua kali.
+  String newSosId() => _uuid.v4();
+
   /// Menekan tombol darurat: mengirim peringatan kritis dan menyegel lokasi.
   /// [location] boleh null atau gagal; peringatan tetap dikirim.
   /// Keselamatan anak tidak boleh bergantung pada sinyal GPS.
   Future<ThreatAlert?> triggerPanic({
     LocationResult? location,
     String? locationLabel,
+    String? id,
   }) async {
     final user = _user;
     if (user == null) return null;
@@ -479,7 +554,7 @@ class AppState extends ChangeNotifier {
     );
 
     final alert = ThreatAlert(
-      id: _uuid.v4(),
+      id: id ?? _uuid.v4(),
       familyId: user.familyId ?? '',
       childId: user.id,
       childName: user.name,
@@ -662,12 +737,15 @@ class AppState extends ChangeNotifier {
     final previousFamily = _user?.familyId;
     final previousId = _user?.id;
     _user = user;
+    unawaited(_rememberAlarmFamily(user));
+    unawaited(_rememberLockSchedule(user));
 
     if (user == null) {
       _alertSub?.cancel();
       _evidenceSub?.cancel();
       _childrenSub?.cancel();
       _chatSub?.cancel();
+      _alertsLoaded = false;
       notifyListeners();
       return;
     }
@@ -677,14 +755,17 @@ class AppState extends ChangeNotifier {
     if (user.isChild && user.id != previousId) {
       _lastMarkedActive = null;
       unawaited(refreshChatScanStatus());
+      unawaited(refreshLockAccess());
       unawaited(markActive());
     }
 
     final familyId = user.familyId;
     if (familyId != null && familyId != previousFamily) {
       _alertSub?.cancel();
+      _alertsLoaded = false;
       _alertSub = repository.watchAlerts(familyId).listen((alerts) {
         _alerts = alerts;
+        _alertsLoaded = true;
         notifyListeners();
       }, onError: _onStreamError);
 

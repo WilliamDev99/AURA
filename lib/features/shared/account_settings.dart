@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/l10n/l10n.dart';
 import '../../core/router/app_router.dart';
+import '../../core/services/push_service.dart';
 import '../../core/theme/aura_colors.dart';
 import '../../core/utils/phone_number.dart';
 import '../../core/widgets/clay.dart';
@@ -165,6 +166,14 @@ class AccountSection extends StatelessWidget {
               },
               onTap: () => showPhoneEditor(context),
             ),
+            // Orang tua memastikan HP-nya benar-benar berbunyi sebelum ada
+            // keadaan darurat: volume alarm, izin notifikasi, Jangan Ganggu.
+            SettingRow(
+              icon: Icons.alarm_rounded,
+              label: tr('Alarm SOS'),
+              value: tr('Coba bunyikan'),
+              onTap: () => testSosAlarm(context),
+            ),
             SettingRow(
               icon: Icons.mail_outline_rounded,
               label: tr('Email'),
@@ -195,6 +204,25 @@ class AccountSection extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Membunyikan alarm SOS sungguhan di HP ini, supaya orang tua tahu bunyinya
+/// dan yakin HP-nya akan berbunyi. Selama berbunyi, kartu "Matikan alarm"
+/// muncul di layar (lihat SosAlarmBanner); yang perlu dikabarkan di sini
+/// hanya bila alarm tidak bisa berbunyi sama sekali.
+Future<void> testSosAlarm(BuildContext context) async {
+  final messenger = ScaffoldMessenger.of(context);
+  if (await PushService.instance.testSosAlarm()) return;
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text(
+        tr(
+          'Notifikasi AURA dimatikan, jadi alarm SOS tidak bisa berbunyi. '
+          'Nyalakan di Pengaturan Android.',
+        ),
+      ),
+    ),
+  );
 }
 
 /// Satu baris pengaturan yang bisa diketuk.
@@ -370,8 +398,8 @@ class _PhoneEditorState extends State<_PhoneEditor> {
             const SizedBox(height: 6),
             Text(
               tr(
-                'Nomor ini ditelepon otomatis saat anak menekan tombol '
-                'darurat.',
+                'Kalau SOS anak tidak terkirim karena internetnya mati, anak '
+                'bisa menelepon nomor ini.',
               ),
               style: const TextStyle(
                 fontSize: 13,

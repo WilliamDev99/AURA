@@ -192,6 +192,12 @@ class _HalftonePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Layar belum punya ukuran, mis. saat Android menyalakan AURA di latar
+    // belakang hanya untuk pemindai pesan. Dulu jarak antarcincin ikut nol,
+    // loop di bawah tidak pernah selesai, dan seluruh aplikasi macet di layar
+    // pembuka saat ikonnya diketuk.
+    if (!orbRadius.isFinite || orbRadius <= 0) return;
+
     final p = phase.value;
     final center = size.center(Offset.zero);
     final breathe = 0.5 + 0.5 * math.sin(2 * math.pi * p);
@@ -223,8 +229,10 @@ class _HalftonePainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
-    var ring = 0;
-    for (var r = start; r <= end; r += step, ring++) {
+    // Jumlah cincin dihitung lebih dulu: loop berhingga apa pun ukurannya.
+    final rings = ((end - start) / step).floor();
+    for (var ring = 0; ring <= rings; ring++) {
+      final r = start + ring * step;
       final t = ((r - start) / (end - start)).clamp(0.0, 1.0);
 
       // Puncak gelombang berada di t = (n + p) / _crests, jadi saat fase

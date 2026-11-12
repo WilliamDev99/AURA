@@ -63,6 +63,13 @@ class NotificationScanner {
       await state.reportChatScan(call.arguments == true, changed: true);
       return null;
     }
+    if (call.method == 'refreshProfile') {
+      // Layar HP anak baru menyala: jam istirahat terbaru diambil saat itu
+      // juga, tanpa menunggu realtime tersambung lagi.
+      await state.untilRestored();
+      await state.refreshProfile();
+      return null;
+    }
     if (call.method != 'message') return null;
     final args = Map<String, Object?>.from(call.arguments as Map);
     await onMessage(

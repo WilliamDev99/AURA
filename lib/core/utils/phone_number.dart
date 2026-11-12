@@ -22,7 +22,7 @@ List<TextInputFormatter> phoneInputFormatters({
 /// `0812 3456 7890`, `62812...`, atau `+62 812...`. Mengembalikan null bila
 /// bukan nomor seluler Indonesia yang masuk akal — nomor darurat yang salah
 /// lebih berbahaya daripada tidak ada nomor sama sekali, karena anak mengira
-/// orang tuanya sedang ditelepon.
+/// sedang menelepon orang tuanya.
 String? normalizeIndonesianPhone(String input) {
   final cleaned = input.replaceAll(RegExp(r'[\s\-().]'), '');
 
@@ -40,11 +40,6 @@ String? normalizeIndonesianPhone(String input) {
   if (!RegExp(r'^8\d{8,12}$').hasMatch(national)) return null;
   return '+62$national';
 }
-
-/// Bentuk nomor yang dipakai WhatsApp: hanya angka dengan kode negara tanpa
-/// `+`, mis. `6281234567890`. Null bila bukan nomor HP Indonesia.
-String? whatsAppDigits(String number) =>
-    normalizeIndonesianPhone(number)?.substring(1);
 
 /// Tampilan ramah untuk dibaca manusia: `+62 812-3456-7890`.
 String formatIndonesianPhone(String normalized) {

@@ -5,13 +5,16 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/l10n/l10n.dart';
 import '../core/utils/resilient_stream.dart';
+import '../core/utils/row_poller.dart';
 import '../domain/models/app_user.dart';
 import '../domain/models/evidence_item.dart';
 import '../domain/models/guardian_message.dart';
+import '../domain/models/lock_schedule.dart';
 import '../domain/models/risk.dart';
 import '../domain/models/threat_alert.dart';
 import '../domain/services/chain_of_custody.dart';
@@ -42,6 +45,40 @@ class SupabaseRepository implements AuraRepository {
   @override
   bool get hasStoredSession => _auth.currentSession != null;
 
+  /// Profil terakhir dari server, disimpan di HP ini.
+  ///
+  /// Dipakai saat AURA dibuka tanpa internet. Tanpa ini layar memuat menunggu
+  /// server selamanya, dan anak tidak bisa sampai ke tombol SOS maupun ke
+  /// tombol "Telepon orang tua". Versi server menggantikannya begitu internet
+  /// kembali.
+  static const _savedProfileKey = 'aura.profile';
+
+  Future<AppUser?> _savedProfile(String uid) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_savedProfileKey);
+      if (raw == null) return null;
+      final user = AppUser.fromMap(jsonDecode(raw) as Map<String, dynamic>);
+      return user.id == uid ? user : null;
+    } catch (error) {
+      debugPrint('AURA: profil tersimpan tidak terbaca ($error).');
+      return null;
+    }
+  }
+
+  Future<void> _saveProfile(AppUser? user) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (user == null) {
+        await prefs.remove(_savedProfileKey);
+      } else {
+        await prefs.setString(_savedProfileKey, jsonEncode(user.toMap()));
+      }
+    } catch (error) {
+      debugPrint('AURA: profil belum tersimpan di perangkat ($error).');
+    }
+  }
+
   @override
   Stream<AppUser?> watchCurrentUser() {
     // Sengaja tidak memakai `asyncExpand`: operator itu menunggu stream di
@@ -54,17 +91,65 @@ class SupabaseRepository implements AuraRepository {
     String? watchedUid;
     late final StreamController<AppUser?> controller;
 
+    // HP anak: token login dijaga tetap diperbarui walau AURA tidak tampil
+    // di layar, supaya realtime tidak mati setelah satu jam. Perubahan dari
+    // orang tua lalu sampai dalam hitungan detik.
+    final keeper = _ChildSessionKeeper(_auth);
+
+    void showProfileRow(Map<String, dynamic> row) {
+      final user = _userFromRow(row);
+      _cached = user;
+      controller.add(user);
+      unawaited(_saveProfile(user));
+      if (user.isChild) keeper.keepFresh();
+    }
+
+    // Cadangan bila realtime tetap terputus: profil diambil ulang tiap
+    // menit, dan saat layar HP anak menyala (lihat [refreshProfile]).
+    final poller = RowPoller(
+      fetch: () async {
+        final uid = _auth.currentSession?.user.id;
+        if (uid == null) return null;
+        final known = _cached;
+        if (known != null && (known.id != uid || !known.isChild)) return null;
+        return _db.from('profiles').select().eq('id', uid).maybeSingle();
+      },
+      onChanged: (row) {
+        if (controller.isClosed) return;
+        if (row['id'] != _auth.currentSession?.user.id) return;
+        showProfileRow(row);
+      },
+    );
+
+    // Profil simpanan dikirim lebih dulu, selama profil dari server belum
+    // datang. Tanpa internet, hanya ini yang akan datang.
+    Future<void> showSavedProfile(String uid) async {
+      final saved = await _savedProfile(uid);
+      if (saved == null || _cached != null || controller.isClosed) return;
+      if (_auth.currentSession?.user.id != uid) return;
+      _cached = saved;
+      controller.add(saved);
+      // Sesinya kedaluwarsa dan AURA berjalan tanpa layar: tanpa ini, token
+      // tidak pernah diperbarui dan langganan profil tidak pernah dimulai.
+      if (saved.isChild) keeper.keepFresh();
+    }
+
     controller = StreamController<AppUser?>(
       onListen: () {
+        _profilePoller = poller;
+        poller.start();
         authSub = _auth.onAuthStateChange.listen((state) {
           final session = state.session;
 
           // Saat aplikasi dibuka setelah lama tidak dipakai, sesi tersimpan
           // sudah kedaluwarsa. Berlangganan dengan token itu pasti ditolak;
-          // tunggu `tokenRefreshed` yang datang sesaat kemudian.
+          // tunggu `tokenRefreshed` yang datang sesaat kemudian. Tanpa
+          // internet token itu tidak pernah datang, jadi sementara itu profil
+          // simpanan yang dipakai.
           if (state.event == AuthChangeEvent.initialSession &&
               session != null &&
               session.isExpired) {
+            unawaited(showSavedProfile(session.user.id));
             return;
           }
 
@@ -79,9 +164,12 @@ class SupabaseRepository implements AuraRepository {
 
           if (uid == null) {
             _cached = null;
+            unawaited(_saveProfile(null));
             controller.add(null);
             return;
           }
+
+          if (_cached?.id != uid) unawaited(showSavedProfile(uid));
 
           profileSub =
               resilientStream(
@@ -91,8 +179,8 @@ class SupabaseRepository implements AuraRepository {
                     .eq('id', uid),
               ).listen((rows) async {
                 if (rows.isNotEmpty) {
-                  _cached = _userFromRow(rows.first);
-                  controller.add(_cached);
+                  poller.seen(rows.first);
+                  showProfileRow(rows.first);
                   return;
                 }
                 // Akun email atau Facebook yang baru mendaftar belum punya
@@ -102,11 +190,15 @@ class SupabaseRepository implements AuraRepository {
                 if (await hasProfile()) return;
                 if (watchedUid != uid) return;
                 _cached = null;
+                unawaited(_saveProfile(null));
                 controller.add(null);
               });
         });
       },
       onCancel: () async {
+        poller.stop();
+        keeper.dispose();
+        if (identical(_profilePoller, poller)) _profilePoller = null;
         await profileSub?.cancel();
         await authSub?.cancel();
       },
@@ -174,6 +266,7 @@ class SupabaseRepository implements AuraRepository {
   Future<void> signOut() async {
     _cached = null;
     _linkingEmail = null;
+    await _saveProfile(null);
     await _auth.signOut();
   }
 
@@ -613,14 +706,52 @@ class SupabaseRepository implements AuraRepository {
     }
   }
 
+  /// Kode penautan yang berlaku 24 jam sejak halaman "Tautkan" dibuka.
+  ///
+  /// Dulu kodenya dibuat sekali saat keluarga dibuat dan tidak pernah
+  /// diperbarui: sehari kemudian halaman itu menampilkan kode yang sudah
+  /// kedaluwarsa sambil menulis "Berlaku 24 jam". Kode yang masih berlaku
+  /// tetap sama (mungkin sudah diberikan ke anak), hanya masa berlakunya yang
+  /// diperpanjang; kode yang sudah kedaluwarsa diganti baru.
   @override
   Future<String?> pairingCode(String familyId) async {
     final row = await _db
         .from('families')
-        .select('pairing_code')
+        .select('pairing_code, pairing_expires_at')
         .eq('id', familyId)
         .maybeSingle();
-    return row?['pairing_code'] as String?;
+    if (row == null) return null;
+    final current = row['pairing_code'] as String?;
+    final expiresAt = _parseDate(row['pairing_expires_at']);
+    final expired =
+        current == null ||
+        (expiresAt != null && expiresAt.isBefore(DateTime.now()));
+
+    var code = expired ? _generateCode() : current;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final updated = await _db
+            .from('families')
+            .update({
+              'pairing_code': code,
+              'pairing_expires_at': DateTime.now()
+                  .add(const Duration(hours: 24))
+                  .toUtc()
+                  .toIso8601String(),
+            })
+            .eq('id', familyId)
+            .select('pairing_code');
+        // Hanya pembuat keluarga yang boleh mengubahnya (RLS). Orang tua lain
+        // tetap melihat kode yang ada.
+        if (updated.isEmpty) return current;
+        return updated.first['pairing_code'] as String?;
+      } on PostgrestException catch (error) {
+        // Kode acak baru kebetulan sama dengan kode keluarga lain.
+        if (error.code != '23505') rethrow;
+        code = _generateCode();
+      }
+    }
+    return current;
   }
 
   @override
@@ -881,6 +1012,27 @@ class SupabaseRepository implements AuraRepository {
   }
 
   @override
+  Future<void> setLockSchedule(String childId, LockSchedule schedule) async {
+    // Penjaga di basis data (patch_06) hanya mengizinkan orang tua mengubah
+    // kolom ini; anak tidak bisa mengubah jam istirahatnya sendiri.
+    await _db
+        .from('profiles')
+        .update({'lock_schedule': schedule.toJson()})
+        .eq('id', childId);
+  }
+
+  RowPoller? _profilePoller;
+
+  @override
+  Future<void> refreshProfile() async => _profilePoller?.poll();
+
+  @override
+  Future<void> reportLockReady(bool ready) async {
+    final uid = _requireUid();
+    await _db.from('profiles').update({'lock_ready': ready}).eq('id', uid);
+  }
+
+  @override
   Future<void> reportChatScan(bool enabled) async {
     final uid = _requireUid();
     await _db
@@ -943,6 +1095,8 @@ class SupabaseRepository implements AuraRepository {
     chatScanEnabled: row['chat_scan_enabled'] as bool?,
     chatScanCheckedAt: _parseDate(row['chat_scan_checked_at']),
     avatarPath: row['avatar_path'] as String?,
+    lockSchedule: LockSchedule.fromJson(row['lock_schedule']),
+    lockReady: row['lock_ready'] as bool?,
   );
 
   ThreatAlert _alertFromRow(Map<String, dynamic> row) => ThreatAlert(
@@ -1029,5 +1183,49 @@ class SupabaseRepository implements AuraRepository {
       6,
       (_) => alphabet[random.nextInt(alphabet.length)],
     ).join();
+  }
+}
+
+/// Menjaga token login HP anak tetap diperbarui walau AURA berjalan tanpa
+/// layar.
+///
+/// supabase_flutter menghentikan pembaruan token otomatis begitu aplikasi
+/// tidak tampil di layar (paused/detached). Di HP anak, AURA hampir selalu
+/// berjalan di latar belakang, dinyalakan oleh pemindai notifikasi. Setelah
+/// satu jam tokennya kedaluwarsa, realtime berhenti, dan perubahan dari orang
+/// tua (mis. jam istirahat dimatikan) tidak sampai. Pengamat ini didaftarkan
+/// setelah milik supabase_flutter, jadi berjalan sesudahnya dan menyalakan
+/// pembaruan itu lagi. HP orang tua tidak memakainya: di sana aplikasinya
+/// dibuka di layar.
+class _ChildSessionKeeper with WidgetsBindingObserver {
+  _ChildSessionKeeper(this._auth);
+
+  final GoTrueClient _auth;
+  bool _started = false;
+  bool _observing = false;
+
+  /// Dipanggil setiap profil anak diketahui; hanya yang pertama berpengaruh.
+  void keepFresh() {
+    if (!_observing) {
+      _observing = true;
+      WidgetsBinding.instance.addObserver(this);
+    }
+    if (_started) return;
+    _started = true;
+    _auth.startAutoRefresh();
+  }
+
+  void dispose() {
+    if (_observing) WidgetsBinding.instance.removeObserver(this);
+    _observing = false;
+    _started = false;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _auth.startAutoRefresh();
+    }
   }
 }

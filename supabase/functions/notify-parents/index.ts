@@ -31,35 +31,72 @@ interface PushAlert {
   source: string | null;
 }
 
-/// Judul notifikasi, dan apakah dibunyikan lewat kanal Darurat.
+/// Judul notifikasi, apakah dibunyikan lewat kanal Darurat, dan apakah ini
+/// tombol SOS.
 ///
 /// Tingkat di aplikasi orang tua: LOW (medium), MEDIUM (high), HARD
 /// (critical). "Darurat" dengan bunyi mendesak hanya untuk tombol SOS dan
 /// ancaman serius. Kata kasar berat juga HARD, tetapi tidak dibunyikan
-/// sebagai darurat.
+/// sebagai darurat. Hanya SOS yang membunyikan alarm di HP orang tua sampai
+/// dimatikan.
 export function pushMessageFor(
   alert: PushAlert,
-): { title: string; urgent: boolean } {
+): { title: string; urgent: boolean; sos: boolean } {
   const child = alert.child_name ?? "Anak";
   const severity = SEVERITY[alert.risk_level] ?? 0;
   const categories = alert.categories ?? [];
 
   if (alert.source === "panicButton") {
-    return { title: `Darurat: ${child} menekan tombol SOS`, urgent: true };
+    return {
+      title: `Darurat: ${child} menekan tombol SOS`,
+      urgent: true,
+      sos: true,
+    };
   }
   if (severity >= SEVERITY.critical) {
     const onlyProfanity =
       categories.length > 0 && categories.every((c) => c === "profanity");
     return onlyProfanity
-      ? { title: `HARD: ${child} menerima kata kasar berat`, urgent: false }
-      : { title: `Darurat: ${child} butuh bantuan`, urgent: true };
+      ? {
+        title: `HARD: ${child} menerima kata kasar berat`,
+        urgent: false,
+        sos: false,
+      }
+      : { title: `Darurat: ${child} butuh bantuan`, urgent: true, sos: false };
   }
   if (severity >= SEVERITY.high) {
-    return { title: `MEDIUM: ${child} menerima pesan berisiko`, urgent: false };
+    return {
+      title: `MEDIUM: ${child} menerima pesan berisiko`,
+      urgent: false,
+      sos: false,
+    };
   }
   return {
     title: `LOW: ada yang perlu Anda ketahui tentang ${child}`,
     urgent: false,
+    sos: false,
+  };
+}
+
+/// Bagian Android dari pesan FCM.
+///
+/// SOS dikirim sebagai pesan data saja, berprioritas tinggi: aplikasi
+/// (SosPushReceiver.kt) langsung membunyikan alarmnya sendiri, yang diputar
+/// layanan alarm sampai orang tua mematikannya, walau AURA sedang tertutup.
+/// Notifikasi FCM biasa hanya akan menambah bunyi kedua, dan suara notifikasi
+/// bisa dibungkam notifikasi lain yang masuk. Saluran lain dibuat di sisi
+/// aplikasi, lihat lib/core/services/push_service.dart.
+export function androidConfigFor(
+  { urgent, sos }: { urgent: boolean; sos: boolean },
+): Record<string, unknown> {
+  if (sos) return { priority: "high" };
+  return {
+    priority: "high",
+    notification: {
+      channel_id: urgent ? "aura_critical" : "aura_alerts",
+      default_vibrate_timings: !urgent,
+      visibility: "PRIVATE",
+    },
   };
 }
 
@@ -155,7 +192,8 @@ Deno.serve(async (request) => {
     const { data: alert, error: alertError } = await db
       .from("alerts")
       .select(
-        "id, family_id, child_name, risk_level, summary, categories, source",
+        "id, family_id, child_name, risk_level, summary, categories, source, " +
+          "detected_at",
       )
       .eq("id", alertId)
       .maybeSingle();
@@ -199,7 +237,8 @@ Deno.serve(async (request) => {
     );
     const token = await accessTokenFor(account);
 
-    const { title, urgent } = pushMessageFor(alert);
+    const { title, urgent, sos } = pushMessageFor(alert);
+    const body = alert.summary ?? "Buka AURA untuk melihat rincian.";
 
     // FCM v1 mengirim satu per satu; tidak ada lagi endpoint multicast.
     const results = await Promise.all(
@@ -217,31 +256,26 @@ Deno.serve(async (request) => {
                 // Kolom `token` menyimpan Firebase Installation ID dari
                 // FirebaseMessaging.onRegistered; FCM v1 menamainya `fid`.
                 fid: device.token,
-                notification: {
-                  title,
-                  body: alert.summary ?? "Buka AURA untuk melihat rincian.",
-                },
+                // SOS tanpa notifikasi di Android (lihat androidConfigFor);
+                // iPhone tetap mendapatkannya lewat `apns` di bawah.
+                ...(sos ? {} : { notification: { title, body } }),
                 data: {
                   alertId: String(alert.id),
                   familyId: String(alert.family_id),
                   riskLevel: String(alert.risk_level),
                   // Aplikasi memakai ini saat AURA sedang terbuka.
                   urgent: String(urgent),
+                  // "true": HP orang tua berbunyi alarm sampai dimatikan.
+                  sos: String(sos),
+                  childName: String(alert.child_name ?? ""),
+                  detectedAt: String(alert.detected_at ?? ""),
                   route: `/orangtua/peringatan/${alert.id}`,
                 },
-                android: {
-                  priority: "high",
-                  notification: {
-                    // Saluran dibuat di sisi aplikasi, lihat
-                    // lib/core/services/push_service.dart.
-                    channel_id: urgent ? "aura_critical" : "aura_alerts",
-                    default_vibrate_timings: !urgent,
-                    visibility: "PRIVATE",
-                  },
-                },
+                android: androidConfigFor({ urgent, sos }),
                 apns: {
                   payload: {
                     aps: {
+                      ...(sos ? { alert: { title, body } } : {}),
                       sound: "default",
                       "interruption-level": urgent
                         ? "critical"

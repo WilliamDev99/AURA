@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 
 import '../core/l10n/l10n.dart';
 import '../domain/models/app_user.dart';
+import '../domain/models/lock_schedule.dart';
 import '../domain/models/evidence_item.dart';
 import '../domain/models/guardian_message.dart';
 import '../domain/models/risk.dart';
@@ -360,6 +361,30 @@ class DemoRepository implements AuraRepository {
       _currentUser = _currentUser!.copyWith(protectionActive: active);
       _userController.add(_currentUser);
     }
+  }
+
+  @override
+  Future<void> setLockSchedule(String childId, LockSchedule schedule) async {
+    final index = _children.indexWhere((c) => c.id == childId);
+    if (index >= 0) {
+      _children[index] = _children[index].copyWith(lockSchedule: schedule);
+      _childrenController.add(List.unmodifiable(_children));
+    }
+    if (_currentUser?.id == childId) {
+      _currentUser = _currentUser!.copyWith(lockSchedule: schedule);
+      _userController.add(_currentUser);
+    }
+  }
+
+  /// Data demo selalu terbaru: tidak ada yang perlu diambil ulang.
+  @override
+  Future<void> refreshProfile() async {}
+
+  @override
+  Future<void> reportLockReady(bool ready) async {
+    final user = _currentUser;
+    if (user == null) return;
+    _updateCurrentUser(user.copyWith(lockReady: ready));
   }
 
   @override

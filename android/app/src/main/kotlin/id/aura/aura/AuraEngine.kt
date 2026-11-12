@@ -90,6 +90,15 @@ object AuraEngine {
         enqueue(context, "accessChanged", enabled)
     }
 
+    /**
+     * Layar HP anak baru menyala: Dart mengambil ulang profilnya sekarang
+     * juga, supaya jam istirahat yang baru diubah orang tua langsung berlaku
+     * walau realtime sempat terputus saat HP tidur. Harus di thread utama.
+     */
+    fun refreshProfile(context: Context) {
+        enqueue(context, "refreshProfile", null)
+    }
+
     private fun enqueue(context: Context, method: String, arguments: Any?) {
         obtain(context)
         if (pending.size >= MAX_PENDING) pending.removeFirst()

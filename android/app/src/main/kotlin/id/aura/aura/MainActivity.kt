@@ -3,16 +3,14 @@ package id.aura.aura
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.ActivityManager
 import android.content.ComponentName
-import android.content.ContentProviderOperation
-import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
-import android.provider.ContactsContract
+import android.os.Bundle
 import android.provider.Settings
 import com.google.android.gms.common.api.ResolvableApiException
 import com.google.android.gms.location.CurrentLocationRequest
@@ -27,11 +25,11 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
 
-    /** Jawaban permintaan izin telepon yang sedang menunggu pilihan pengguna. */
-    private var pendingCallPermission: MethodChannel.Result? = null
-
     /** Jawaban permintaan menyalakan lokasi yang sedang menunggu pilihan anak. */
     private var pendingLocationSettings: MethodChannel.Result? = null
+
+    /** Rincian SOS yang dibuka dari notifikasi alarm, menunggu diambil Dart. */
+    private var pendingSosRoute: String? = null
 
     /**
      * Layar memakai mesin yang sama dengan pemindai pesan (lihat AuraEngine),
@@ -51,6 +49,49 @@ class MainActivity : FlutterActivity() {
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // Bukan saat layar dibuat ulang (mis. diputar): tombolnya sudah
+        // dijalankan sebelumnya.
+        if (savedInstanceState == null) handleSosAction(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Kembali dari halaman izin: Pengaturan terkunci lagi saat jam
+        // istirahat.
+        ScreenLock.endSettingsGrace()
+        hideFromRecentsOnChildPhone()
+    }
+
+    /**
+     * HP anak yang punya jam istirahat: AURA tidak tampil di daftar aplikasi
+     * terbaru. Realme dan OPPO mematikan semua aplikasi di daftar itu saat
+     * "Bersihkan semua" ditekan, termasuk AURA, dan selama AURA mati tidak
+     * ada yang mengunci. Hanya HP anak yang menyimpan jadwal ini.
+     */
+    private fun hideFromRecentsOnChildPhone() {
+        val child = ScreenLock.schedule(this) != null
+        val tasks = (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).appTasks
+        for (task in tasks) runCatching { task.setExcludeFromRecents(child) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleSosAction(intent)
+    }
+
+    /**
+     * Notifikasi alarm SOS diketuk: alarmnya dimatikan (orang tua sudah tahu)
+     * dan rincian SOS-nya disiapkan untuk dibuka.
+     */
+    private fun handleSosAction(intent: Intent?) {
+        if (intent?.action != SosAlarm.ACTION_OPEN) return
+        // Diambil Dart lewat "takeSosRoute" saat layar kembali.
+        pendingSosRoute = intent.getStringExtra("route")
+        SosAlarm.stop(this)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
@@ -60,20 +101,47 @@ class MainActivity : FlutterActivity() {
                         timeoutMs = call.argument<Int>("timeoutMs") ?: 6000,
                         result = result,
                     )
-                    "placeCall" -> placeCall(call.argument<String>("number"), result)
-                    "hasCallPermission" -> result.success(hasCallPermission())
-                    "requestCallPermission" -> requestCallPermission(result)
-                    "hasWhatsApp" -> result.success(whatsAppPackage() != null)
-                    "placeWhatsAppCall" ->
-                        placeWhatsAppCall(call.argument<String>("digits"), result)
-                    "whatsAppCallReady" ->
-                        whatsAppCallReady(call.argument<String>("digits"), result)
-                    "saveParentContact" -> saveParentContact(
-                        number = call.argument<String>("number"),
-                        name = call.argument<String>("name"),
-                        result = result,
-                    )
                     "ensureLocationOn" -> ensureLocationOn(result)
+                    "lockAccess" -> result.success(
+                        mapOf(
+                            "usage" to ScreenLock.hasUsageAccess(this),
+                            "overlay" to ScreenLock.canDrawOverlay(this),
+                            "battery" to ScreenLock.ignoresBatteryOptimizations(this),
+                        ),
+                    )
+                    "openUsageAccessSettings" -> {
+                        openSettings(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                        result.success(null)
+                    }
+                    "openOverlaySettings" -> {
+                        openSettings(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                        result.success(null)
+                    }
+                    "openBatterySettings" -> {
+                        openBatterySettings()
+                        result.success(null)
+                    }
+                    "testSosAlarm" -> {
+                        SosAlarm.start(this, SosAlarmInfo.test())
+                        result.success(true)
+                    }
+                    "stopSosAlarm" -> {
+                        SosAlarm.stop(this)
+                        result.success(null)
+                    }
+                    "sosAlarmState" -> {
+                        val ringing = SosAlarmService.current
+                        result.success(
+                            mapOf(
+                                "ringing" to (ringing != null),
+                                "route" to ringing?.route,
+                            ),
+                        )
+                    }
+                    "takeSosRoute" -> {
+                        result.success(pendingSosRoute)
+                        pendingSosRoute = null
+                    }
                     "openNotificationAccessSettings" -> {
                         openNotificationAccessSettings()
                         result.success(null)
@@ -146,6 +214,7 @@ class MainActivity : FlutterActivity() {
      * di halaman AURA supaya tidak perlu mencari di daftar.
      */
     private fun openNotificationAccessSettings() {
+        ScreenLock.allowSettingsBriefly()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val component = ComponentName(this, AuraNotificationListener::class.java)
             val detail = Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
@@ -161,288 +230,6 @@ class MainActivity : FlutterActivity() {
             }
         }
         startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-    }
-
-    private fun hasCallPermission() =
-        checkSelfPermission(Manifest.permission.CALL_PHONE) ==
-            PackageManager.PERMISSION_GRANTED
-
-    /**
-     * Menelepon orang tua langsung saat anak menekan tombol darurat.
-     *
-     * Lewat jaringan seluler biasa, jadi tetap jalan saat internet mati.
-     * Tanpa izin CALL_PHONE, Dart membuka aplikasi Telepon dengan nomor
-     * terisi sebagai gantinya.
-     */
-    @SuppressLint("MissingPermission") // Izin diperiksa tepat di bawah.
-    private fun placeCall(number: String?, result: MethodChannel.Result) {
-        if (number.isNullOrBlank()) {
-            result.success("no_number")
-            return
-        }
-        if (!hasCallPermission()) {
-            result.success("no_permission")
-            return
-        }
-        try {
-            startActivity(
-                Intent(Intent.ACTION_CALL, Uri.fromParts("tel", number, null))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-            result.success("called")
-        } catch (error: Exception) {
-            result.success("failed")
-        }
-    }
-
-    /**
-     * Meminta izin telepon, sekaligus izin Kontak bila WhatsApp terpasang.
-     *
-     * Kontak hanya dipakai untuk nomor orang tua: menyimpannya supaya
-     * WhatsApp mengenalinya, lalu menemukannya saat anak menekan "Telepon
-     * lewat WhatsApp". Tanpa WhatsApp, izin itu tidak berguna, jadi tidak
-     * diminta. Baca dan tulis Kontak satu kelompok izin: satu dialog saja.
-     */
-    private fun requestCallPermission(result: MethodChannel.Result) {
-        val missing = buildList {
-            if (!hasCallPermission()) add(Manifest.permission.CALL_PHONE)
-            if (whatsAppPackage() != null) {
-                if (!hasContactsPermission()) add(Manifest.permission.READ_CONTACTS)
-                if (!hasWriteContactsPermission()) {
-                    add(Manifest.permission.WRITE_CONTACTS)
-                }
-            }
-        }
-        if (missing.isEmpty()) {
-            result.success(hasCallPermission())
-            return
-        }
-        // Permintaan sebelumnya yang belum dijawab dianggap ditolak.
-        pendingCallPermission?.success(false)
-        pendingCallPermission = result
-        requestPermissions(missing.toTypedArray(), CALL_PERMISSION_REQUEST)
-    }
-
-    private fun hasContactsPermission() =
-        checkSelfPermission(Manifest.permission.READ_CONTACTS) ==
-            PackageManager.PERMISSION_GRANTED
-
-    private fun hasWriteContactsPermission() =
-        checkSelfPermission(Manifest.permission.WRITE_CONTACTS) ==
-            PackageManager.PERMISSION_GRANTED
-
-    /**
-     * Apakah "Telepon lewat WhatsApp" akan langsung menelepon: WhatsApp sudah
-     * menambahkan baris panggilan suara untuk nomor orang tua di Kontak.
-     */
-    private fun whatsAppCallReady(digits: String?, result: MethodChannel.Result) {
-        val packageName = whatsAppPackage()
-        if (digits.isNullOrBlank() || packageName == null) {
-            result.success(false)
-            return
-        }
-        Thread {
-            val ready = findWhatsAppCallRow(packageName, digits) != null
-            runOnUiThread { result.success(ready) }
-        }.start()
-    }
-
-    /**
-     * Menyimpan nomor orang tua di Kontak bila belum ada.
-     *
-     * WhatsApp hanya bisa langsung menelepon nomor yang ada di Kontak. Tanpa
-     * ini, tombol WhatsApp saat SOS baru membuka chat dan anak masih harus
-     * menekan ikon telepon. Kontak yang sudah ada tidak pernah diubah.
-     *
-     * Jawaban: "exists", "added", "no_permission", "not_installed",
-     * "no_number", atau "failed".
-     */
-    private fun saveParentContact(
-        number: String?,
-        name: String?,
-        result: MethodChannel.Result,
-    ) {
-        if (number.isNullOrBlank()) {
-            result.success("no_number")
-            return
-        }
-        if (whatsAppPackage() == null) {
-            result.success("not_installed")
-            return
-        }
-        if (!hasContactsPermission() || !hasWriteContactsPermission()) {
-            result.success("no_permission")
-            return
-        }
-        Thread {
-            val reply = try {
-                if (hasContactWithNumber(number)) {
-                    "exists"
-                } else {
-                    insertContact(name?.takeIf { it.isNotBlank() } ?: "AURA", number)
-                    "added"
-                }
-            } catch (_: Exception) {
-                "failed"
-            }
-            runOnUiThread { result.success(reply) }
-        }.start()
-    }
-
-    /** Pencarian bawaan Android, yang sudah menyamakan 0812... dan +62812... */
-    private fun hasContactWithNumber(number: String): Boolean {
-        val uri = Uri.withAppendedPath(
-            ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
-            Uri.encode(number),
-        )
-        contentResolver.query(
-            uri,
-            arrayOf(ContactsContract.PhoneLookup._ID),
-            null,
-            null,
-            null,
-        )?.use { return it.moveToFirst() }
-        return false
-    }
-
-    /** Kontak lokal di perangkat, tidak masuk akun Google mana pun. */
-    private fun insertContact(name: String, number: String) {
-        val operations = arrayListOf(
-            ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI)
-                .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, null)
-                .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, null)
-                .build(),
-            ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
-                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
-                .withValue(
-                    ContactsContract.Data.MIMETYPE,
-                    ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE,
-                )
-                .withValue(
-                    ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME,
-                    name,
-                )
-                .build(),
-            ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
-                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
-                .withValue(
-                    ContactsContract.Data.MIMETYPE,
-                    ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE,
-                )
-                .withValue(ContactsContract.CommonDataKinds.Phone.NUMBER, number)
-                .withValue(
-                    ContactsContract.CommonDataKinds.Phone.TYPE,
-                    ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE,
-                )
-                .build(),
-        )
-        contentResolver.applyBatch(ContactsContract.AUTHORITY, operations)
-    }
-
-    /** WhatsApp biasa didahulukan; WhatsApp Business bila hanya itu yang ada. */
-    private fun whatsAppPackage(): String? =
-        WhatsAppContact.callMimeTypes.keys.firstOrNull { isInstalled(it) }
-
-    private fun isInstalled(packageName: String) = try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            packageManager.getPackageInfo(
-                packageName,
-                PackageManager.PackageInfoFlags.of(0),
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            packageManager.getPackageInfo(packageName, 0)
-        }
-        true
-    } catch (_: PackageManager.NameNotFoundException) {
-        false
-    }
-
-    /**
-     * Menelepon orang tua lewat WhatsApp, untuk HP tanpa pulsa atau tablet
-     * tanpa SIM. Butuh internet.
-     *
-     * Bila nomor orang tua tersimpan di Kontak, panggilan suara langsung
-     * dimulai ("called"). Bila tidak, atau izin Kontak tidak ada, chat
-     * WhatsApp orang tua dibuka ("chat_opened") dan anak tinggal menekan ikon
-     * telepon di sana.
-     *
-     * Pencarian kontak berjalan di luar thread utama: jalur darurat tidak
-     * boleh membuat layar membeku.
-     */
-    private fun placeWhatsAppCall(digits: String?, result: MethodChannel.Result) {
-        if (digits.isNullOrBlank()) {
-            result.success("no_number")
-            return
-        }
-        val packageName = whatsAppPackage()
-        if (packageName == null) {
-            result.success("not_installed")
-            return
-        }
-        Thread {
-            val row = findWhatsAppCallRow(packageName, digits)
-            runOnUiThread {
-                if (row != null) {
-                    try {
-                        startActivity(
-                            Intent(Intent.ACTION_VIEW)
-                                .setDataAndType(
-                                    ContentUris.withAppendedId(
-                                        ContactsContract.Data.CONTENT_URI,
-                                        row,
-                                    ),
-                                    WhatsAppContact.callMimeTypes.getValue(packageName),
-                                )
-                                .setPackage(packageName)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                        )
-                        result.success("called")
-                        return@runOnUiThread
-                    } catch (_: Exception) {
-                        // WhatsApp menolak baris itu; buka chat-nya saja.
-                    }
-                }
-                try {
-                    startActivity(
-                        Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits"))
-                            .setPackage(packageName)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                    result.success("chat_opened")
-                } catch (_: Exception) {
-                    result.success("failed")
-                }
-            }
-        }.start()
-    }
-
-    /** ID baris "Panggilan suara" WhatsApp milik [digits], atau null. */
-    private fun findWhatsAppCallRow(packageName: String, digits: String): Long? {
-        if (!hasContactsPermission()) return null
-        val mimeType = WhatsAppContact.callMimeTypes[packageName] ?: return null
-        return try {
-            contentResolver.query(
-                ContactsContract.Data.CONTENT_URI,
-                arrayOf(
-                    ContactsContract.Data._ID,
-                    ContactsContract.Data.DATA1,
-                    ContactsContract.Data.DATA3,
-                ),
-                "${ContactsContract.Data.MIMETYPE} = ?",
-                arrayOf(mimeType),
-                null,
-            )?.use { cursor ->
-                while (cursor.moveToNext()) {
-                    if (WhatsAppContact.matches(cursor.getString(1), cursor.getString(2), digits)) {
-                        return cursor.getLong(0)
-                    }
-                }
-                null
-            }
-        } catch (_: Exception) {
-            null
-        }
     }
 
     /**
@@ -483,6 +270,40 @@ class MainActivity : FlutterActivity() {
             }
     }
 
+    /**
+     * Halaman izin khusus untuk jam istirahat. Bila bisa, langsung di baris
+     * AURA, supaya anak tidak perlu mencarinya di daftar.
+     */
+    private fun openSettings(action: String) {
+        ScreenLock.allowSettingsBriefly()
+        val own = Intent(action, android.net.Uri.fromParts("package", packageName, null))
+        try {
+            startActivity(own)
+        } catch (_: Exception) {
+            startActivity(Intent(action))
+        }
+    }
+
+    /**
+     * Dialog Android "Izinkan AURA selalu berjalan di latar belakang?". Bila
+     * HP tidak menyediakannya, daftar pengecualian penghemat baterai.
+     */
+    private fun openBatterySettings() {
+        ScreenLock.allowSettingsBriefly()
+        try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.fromParts("package", packageName, null),
+                ),
+            )
+        } catch (_: Exception) {
+            runCatching {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            }
+        }
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != LOCATION_SETTINGS_REQUEST) return
@@ -492,21 +313,8 @@ class MainActivity : FlutterActivity() {
         pendingLocationSettings = null
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray,
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != CALL_PERMISSION_REQUEST) return
-        // Bisa berisi izin Kontak juga; yang dilaporkan tetap izin telepon.
-        pendingCallPermission?.success(hasCallPermission())
-        pendingCallPermission = null
-    }
-
     private companion object {
         const val CHANNEL = "id.aura/sos"
-        const val CALL_PERMISSION_REQUEST = 4711
         const val LOCATION_SETTINGS_REQUEST = 4712
     }
 }

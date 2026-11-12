@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/widgets.dart';
 
 import '../domain/models/app_user.dart';
+import '../domain/models/lock_schedule.dart';
 import '../domain/models/evidence_item.dart';
 import '../domain/models/guardian_message.dart';
 import '../domain/models/threat_alert.dart';
@@ -417,6 +418,25 @@ class FirestoreRepository implements AuraRepository {
   Future<void> setProtectionActive(String childId, bool active) async {
     await _db.collection('users').doc(childId).set({
       'protectionActive': active,
+    }, SetOptions(merge: true));
+  }
+
+  @override
+  Future<void> setLockSchedule(String childId, LockSchedule schedule) async {
+    await _db.collection('users').doc(childId).set({
+      'lockSchedule': schedule.toJson(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Firestore memperbarui sesinya sendiri: tidak ada yang perlu diambil
+  /// ulang.
+  @override
+  Future<void> refreshProfile() async {}
+
+  @override
+  Future<void> reportLockReady(bool ready) async {
+    await _db.collection('users').doc(_requireUid()).set({
+      'lockReady': ready,
     }, SetOptions(merge: true));
   }
 

@@ -13,11 +13,57 @@ import '../../domain/models/app_user.dart';
 import '../../domain/models/threat_alert.dart';
 import '../../state/app_state.dart';
 import 'alert_card.dart';
+import 'lock_schedule_sheet.dart';
 import '../../core/widgets/heat_tier.dart';
 import 'threat_radar.dart';
 import '../../core/l10n/l10n.dart';
 
 const _poppins = 'Poppins';
+
+/// Data keluarga belum termuat, biasanya karena tanpa internet. Sengaja
+/// tidak menampilkan "aman" atau "belum ada anak": daftar kosong di sini
+/// berarti belum tahu, bukan tidak ada apa-apa.
+class _WaitingForDataCard extends StatelessWidget {
+  const _WaitingForDataCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return ClayCard(
+      child: Builder(
+        builder: (context) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.cloud_off_rounded, color: AuraColors.medium),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    tr('Menunggu internet'),
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              tr(
+                'Peringatan dan status anak belum bisa dimuat. Begitu '
+                'internet tersambung, semuanya muncul di sini, termasuk alarm '
+                'SOS yang tertunda.',
+              ),
+              style: const TextStyle(fontSize: 13, height: 1.45),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 /// Beranda orang tua.
 class ParentDashboardPage extends StatelessWidget {
@@ -30,6 +76,13 @@ class ParentDashboardPage extends StatelessWidget {
     // berisi hal yang masih menunggu tindakan. Peringatannya tidak dihapus;
     // buktinya tetap utuh di Log dan tetap bisa dilaporkan.
     final alerts = state.unreadAlerts;
+
+    if (!state.familyDataLoaded) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+        children: const [_WaitingForDataCard()],
+      );
+    }
 
     return RefreshIndicator(
       onRefresh: () async =>
@@ -886,6 +939,8 @@ class _ChildSheet extends StatelessWidget {
                 ],
               ),
             ),
+            const SizedBox(height: 14),
+            LockScheduleCard(child: child),
           ],
         ),
       ),

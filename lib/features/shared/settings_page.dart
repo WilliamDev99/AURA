@@ -9,8 +9,8 @@ import '../../core/utils/phone_number.dart';
 import '../../core/utils/time_format.dart';
 import '../../core/widgets/aura_widgets.dart';
 import '../../core/widgets/clay.dart';
-import '../../domain/services/emergency_call_service.dart';
 import '../child/widgets/chat_scan_status.dart';
+import '../child/widgets/lock_access_setup.dart';
 import '../../state/app_state.dart';
 import 'account_settings.dart';
 
@@ -129,18 +129,16 @@ class SettingsBody extends StatelessWidget {
                           'd MMMM yyyy, HH:mm',
                         ),
                 ),
-                // Transparansi: anak tahu siapa yang akan ditelepon. Orang
-                // tua melihat nomornya sendiri di bagian Akun.
+                // Nomor yang bisa ditelepon anak bila SOS-nya tidak terkirim.
+                // Orang tua melihat nomornya sendiri di bagian Akun.
                 InfoRow(
-                  label: tr('Ditelepon saat darurat'),
+                  label: tr('Nomor orang tua'),
                   value: switch (state.emergencyNumber) {
                     final number? => formatIndonesianPhone(number),
                     null => tr('Belum diisi'),
                   },
                 ),
-                if (state.emergencyNumber != null)
-                  // Diperiksa ulang bila orang tua mengganti nomornya.
-                  _WhatsAppCallSetup(key: ValueKey(state.emergencyNumber)),
+                const LockAccessSetup(),
               ],
               InfoRow(
                 label: tr('Peringatan terkirim'),
@@ -215,115 +213,6 @@ class SettingsBody extends StatelessWidget {
 }
 
 /// Ajakan mengamankan akun orang tua lama yang masih anonim.
-/// Kesiapan "Telepon lewat WhatsApp" di ponsel anak.
-///
-/// Tombol WhatsApp saat SOS hanya langsung menelepon bila WhatsApp sudah
-/// mengenali nomor orang tua dari Kontak. Kalau belum, baris ini memberi
-/// tahu dan menyiapkannya, jauh sebelum keadaan darurat. Juga jalan bagi
-/// ponsel yang sudah memberi persetujuan sebelum fitur ini ada.
-class _WhatsAppCallSetup extends StatefulWidget {
-  const _WhatsAppCallSetup({super.key});
-
-  @override
-  State<_WhatsAppCallSetup> createState() => _WhatsAppCallSetupState();
-}
-
-class _WhatsAppCallSetupState extends State<_WhatsAppCallSetup>
-    with WidgetsBindingObserver {
-  WhatsAppCallStatus? _status;
-  bool _busy = false;
-
-  /// Hasil terakhir menekan "Siapkan"; null selama belum ditekan.
-  bool? _saved;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _check();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  /// Diperiksa lagi saat kembali dari WhatsApp atau Pengaturan Android.
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _check();
-  }
-
-  Future<void> _check() async {
-    final status = await context.read<AppState>().whatsAppCallStatus();
-    if (mounted) setState(() => _status = status);
-  }
-
-  Future<void> _prepare() async {
-    final state = context.read<AppState>();
-    setState(() => _busy = true);
-    await state.callService.requestPermission();
-    final saved = await state.saveParentContactForWhatsApp();
-    final status = await state.whatsAppCallStatus();
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _saved = saved;
-      _status = status;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    switch (_status) {
-      case null || WhatsAppCallStatus.unavailable:
-        return const SizedBox.shrink();
-      case WhatsAppCallStatus.ready:
-        return InfoRow(
-          label: tr('Telepon WhatsApp'),
-          value: tr('Siap, langsung menelepon'),
-          valueColor: AuraColors.safe,
-        );
-      case WhatsAppCallStatus.needsSetup:
-        break;
-    }
-
-    final hint = switch (_saved) {
-      null => tr(
-        'Saat SOS, tombol WhatsApp baru membuka chat. Siapkan supaya '
-        'langsung menelepon.',
-      ),
-      true => tr(
-        'Nomor orang tuamu sudah ada di Kontak. Buka WhatsApp sekali supaya '
-        'nomornya dikenali, lalu kembali ke sini.',
-      ),
-      false => tr(
-        'Izin Kontak dibutuhkan supaya WhatsApp bisa langsung menelepon '
-        'orang tuamu.',
-      ),
-    };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        InfoRow(
-          label: tr('Telepon WhatsApp'),
-          value: hint,
-          valueColor: AuraColors.medium,
-        ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton.icon(
-            onPressed: _busy ? null : _prepare,
-            icon: const Icon(Icons.wifi_calling_3_rounded, size: 18),
-            label: Text(_saved == true ? tr('Periksa lagi') : tr('Siapkan')),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _SecureAccountCard extends StatelessWidget {
   const _SecureAccountCard();
 

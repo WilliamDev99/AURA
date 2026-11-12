@@ -44,6 +44,10 @@ create table if not exists public.profiles (
   chat_scan_checked_at  timestamptz,
   -- Letak foto profil di Storage (bucket privat "avatars").
   avatar_path           text,
+  -- Jam istirahat anak, diatur orang tua (lihat patch_06_lock_schedule.sql).
+  lock_schedule         jsonb,
+  -- Dilaporkan ponsel anak: izin untuk mengunci aplikasi sudah diberikan.
+  lock_ready            boolean,
   created_at            timestamptz not null default now()
 );
 
@@ -176,16 +180,23 @@ begin
   end if;
 
   if auth.uid() is distinct from old.id then
-    -- Orang tua hanya boleh menyalakan/menjeda perlindungan anak. Semua
-    -- kolom lain (nomor HP, foto, status pemindaian chat, dan kolom yang
-    -- ditambahkan kelak) harus tetap sama.
-    if (to_jsonb(new) - 'protection_active')
-       = (to_jsonb(old) - 'protection_active')
+    -- Orang tua hanya boleh menyalakan/menjeda perlindungan anak dan mengatur
+    -- jam istirahatnya. Semua kolom lain (nomor HP, foto, status yang
+    -- dilaporkan HP anak, dan kolom yang ditambahkan kelak) harus tetap sama.
+    if (to_jsonb(new) - 'protection_active' - 'lock_schedule')
+       = (to_jsonb(old) - 'protection_active' - 'lock_schedule')
     then
       return new;
     end if;
 
     raise exception 'Hanya pemilik profil yang dapat mengubah data ini.'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  -- Anak tidak boleh mengubah jam istirahatnya sendiri.
+  if old.role = 'child'
+     and new.lock_schedule is distinct from old.lock_schedule then
+    raise exception 'Jam istirahat hanya bisa diubah orang tua.'
       using errcode = 'insufficient_privilege';
   end if;
 
