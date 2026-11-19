@@ -69,6 +69,22 @@ class LockScheduleTest {
     }
 
     @Test
+    fun findsAppOpenedLongBeforeRestTimeStarts() {
+        val minute = 60_000L
+        val hour = 60 * minute
+        val now = 1_000 * hour
+        // Pemeriksaan terakhir kemarin pukul 09.00, sekarang 22.00: catatan
+        // sejak 09.00 ikut dibaca, jadi TikTok yang dibuka pukul 21.30
+        // langsung ketahuan.
+        assertEquals(now - 13 * hour - 15_000, LockSchedule.eventsSince(now, now - 13 * hour))
+        // Saat terkunci (tiap setengah detik): cukup belasan detik terakhir.
+        assertEquals(now - 500 - 15_000, LockSchedule.eventsSince(now, now - 500))
+        // Paling jauh sehari, juga saat AURA baru dinyalakan.
+        assertEquals(now - 24 * hour, LockSchedule.eventsSince(now, now - 72 * hour))
+        assertEquals(now - 24 * hour, LockSchedule.eventsSince(now, 0))
+    }
+
+    @Test
     fun checksRightAfterTheMinuteTurns() {
         // 22.14.59: diperiksa lagi tepat setelah 22.15.00, bukan setengah
         // menit kemudian.

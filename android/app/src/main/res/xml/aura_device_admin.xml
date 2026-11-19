@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AURA menjadi admin perangkat hanya supaya tidak bisa dihapus tanpa izin
+     orang tua (lihat AuraDeviceAdmin.kt). Tidak ada kewenangan yang dipakai:
+     tidak mengunci layar, tidak menghapus data, tidak mengatur kata sandi. -->
+<device-admin>
+    <uses-policies />
+</device-admin>

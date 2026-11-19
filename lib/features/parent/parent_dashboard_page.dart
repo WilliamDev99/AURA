@@ -14,6 +14,7 @@ import '../../domain/models/threat_alert.dart';
 import '../../state/app_state.dart';
 import 'alert_card.dart';
 import 'lock_schedule_sheet.dart';
+import 'uninstall_card.dart';
 import '../../core/widgets/heat_tier.dart';
 import 'threat_radar.dart';
 import '../../core/l10n/l10n.dart';
@@ -95,6 +96,13 @@ class ParentDashboardPage extends StatelessWidget {
             waiting: alerts.length,
           ),
           const SizedBox(height: 18),
+          // Anak yang meminta PIN untuk menghapus AURA: PIN-nya tampil di
+          // sini juga, tanpa harus membuka rincian anak.
+          for (final child in state.children)
+            if (state.uninstallPinFor(child.id) != null) ...[
+              UninstallCard(child: child),
+              const SizedBox(height: 14),
+            ],
           _HeatmapCard(alerts: alerts),
           const SizedBox(height: 14),
           _ProtectionStatusCard(children: state.children),
@@ -941,6 +949,8 @@ class _ChildSheet extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             LockScheduleCard(child: child),
+            const SizedBox(height: 14),
+            UninstallCard(child: child),
           ],
         ),
       ),

@@ -470,6 +470,22 @@ void main() {
       expect(lock, contains('CHECK_LOCKED_MS = 500L'));
     });
 
+    test('jam istirahat mulai saat anak sudah lama di satu aplikasi: '
+        'peringatan langsung muncul', () {
+      final lock = File(
+        'android/app/src/main/kotlin/id/aura/aura/ScreenLock.kt',
+      ).readAsStringSync();
+      final foreground = lock.substring(
+        lock.indexOf('private fun foregroundApp('),
+        lock.indexOf('private fun settingsApps('),
+      );
+      // Semua perpindahan sejak pembacaan terakhir, bukan 15 detik
+      // terakhir saja (lihat LockScheduleTest.kt).
+      expect(foreground, contains('LockSchedule.eventsSince('));
+      expect(foreground, contains('eventsReadUntil = end'));
+      expect(foreground, isNot(contains('else 15_000L')));
+    });
+
     test('pengunci berjalan di thread sendiri, tidak tertahan Flutter', () {
       final lock = File(
         'android/app/src/main/kotlin/id/aura/aura/ScreenLock.kt',

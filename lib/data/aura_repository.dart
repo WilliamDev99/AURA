@@ -7,6 +7,7 @@ import '../domain/models/evidence_item.dart';
 import '../domain/models/guardian_message.dart';
 import '../domain/models/lock_schedule.dart';
 import '../domain/models/threat_alert.dart';
+import '../domain/models/uninstall_permission.dart';
 import '../domain/services/threat_analyzer.dart';
 
 /// Pesan bila kode dari email salah atau kedaluwarsa.
@@ -180,6 +181,23 @@ abstract interface class AuraRepository {
   /// menyala), tanpa menunggu realtime, supaya jam istirahat yang baru diubah
   /// orang tua langsung berlaku.
   Future<void> refreshProfile();
+
+  /// Ponsel anak meminta PIN untuk menghapus AURA. PIN-nya dibuat server
+  /// dan hanya dikirim ke orang tua; ponsel anak tidak menerimanya.
+  Future<void> requestUninstallPin();
+
+  /// Ponsel anak memasukkan PIN dari orang tua. Diperiksa server.
+  Future<PinCheck> verifyUninstallPin(String pin);
+
+  /// Ponsel orang tua: PIN hapus AURA anak-anak sekeluarga.
+  Stream<List<UninstallPin>> watchUninstallPins(String familyId);
+
+  /// Orang tua membatalkan PIN yang belum dipakai.
+  Future<void> cancelUninstallPin(String childId);
+
+  /// Ponsel anak melaporkan apakah AURA terlindung dari penghapusan (aktif
+  /// sebagai admin perangkat).
+  Future<void> reportUninstallProtected(bool protected);
 
   /// Ponsel anak melaporkan apakah pemindaian chat ("Akses notifikasi")
   /// sedang menyala, supaya terlihat di ponsel orang tua.

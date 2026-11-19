@@ -99,6 +99,14 @@ object AuraEngine {
         enqueue(context, "refreshProfile", null)
     }
 
+    /**
+     * Perlindungan hapus (admin perangkat) baru saja dinyalakan atau
+     * dimatikan: Dart melaporkannya ke orang tua. Harus di thread utama.
+     */
+    fun reportUninstallProtection(context: Context, protected: Boolean) {
+        enqueue(context, "uninstallProtectionChanged", protected)
+    }
+
     private fun enqueue(context: Context, method: String, arguments: Any?) {
         obtain(context)
         if (pending.size >= MAX_PENDING) pending.removeFirst()

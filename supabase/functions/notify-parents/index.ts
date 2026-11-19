@@ -4,6 +4,10 @@
 // Dipicu oleh Database Webhook Supabase setiap ada baris baru di tabel
 // `alerts`, lalu meneruskannya sebagai notifikasi ke perangkat orang tua.
 //
+// Juga dipanggil langsung oleh HP anak yang baru meminta PIN untuk menghapus
+// AURA ({"type": "uninstall_pin"}): PIN-nya dibaca di sini dan hanya dikirim
+// ke perangkat orang tua. HP anak tidak pernah menerimanya.
+//
 // Kenapa masih lewat Firebase? Supabase tidak punya layanan push, dan FCM
 // adalah satu-satunya jalan resmi mengirim notifikasi ke perangkat Android.
 // Kabar baiknya, FCM gratis dan tidak menuntut paket berbayar: yang menuntut
@@ -170,9 +174,135 @@ async function accessTokenFor(account: ServiceAccount): Promise<string> {
   return access_token as string;
 }
 
+/// Notifikasi PIN hapus AURA untuk orang tua.
+export function uninstallPinMessage(
+  child: string,
+  pin: string,
+): { title: string; body: string } {
+  return {
+    title: `${child} minta izin menghapus AURA`,
+    body: `PIN: ${pin}. Berikan PIN ini ke ${child} hanya kalau Anda ` +
+      "mengizinkan AURA dihapus. Berlaku 30 menit, sekali pakai.",
+  };
+}
+
+/// HP anak baru saja meminta PIN (fungsi request_uninstall_pin di basis
+/// data). Pemanggilnya dikenali dari token login-nya, bukan dari isi
+/// permintaan: anak hanya bisa memicu notifikasi PIN miliknya sendiri, ke
+/// orang tuanya sendiri.
+async function sendUninstallPin(request: Request): Promise<Response> {
+  const jwt = (request.headers.get("Authorization") ?? "")
+    .replace(/^Bearer\s+/i, "");
+  const db = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  const { data: auth, error: authError } = await db.auth.getUser(jwt);
+  if (authError || !auth?.user) {
+    return new Response("Belum masuk.", { status: 401 });
+  }
+
+  const { data: child, error: childError } = await db
+    .from("profiles")
+    .select("id, name, role, family_id")
+    .eq("id", auth.user.id)
+    .maybeSingle();
+  if (childError) throw childError;
+  if (!child || child.role !== "child" || !child.family_id) {
+    return new Response("Hanya HP anak yang tertaut.", { status: 403 });
+  }
+
+  const { data: pin, error: pinError } = await db
+    .from("uninstall_pins")
+    .select("pin, expires_at, closed_at")
+    .eq("child_id", child.id)
+    .maybeSingle();
+  if (pinError) throw pinError;
+  if (!pin || pin.closed_at || new Date(pin.expires_at) <= new Date()) {
+    return new Response("Tidak ada PIN aktif.", { status: 404 });
+  }
+
+  const { data: parents, error: parentsError } = await db
+    .from("profiles")
+    .select("id")
+    .eq("family_id", child.family_id)
+    .eq("role", "parent");
+  if (parentsError) throw parentsError;
+  if (!parents?.length) {
+    return Response.json({ sent: 0, reason: "tidak ada orang tua" });
+  }
+
+  const { data: devices, error: devicesError } = await db
+    .from("device_tokens")
+    .select("token")
+    .in("user_id", parents.map((p) => p.id));
+  if (devicesError) throw devicesError;
+  if (!devices?.length) {
+    return Response.json({ sent: 0, reason: "tidak ada perangkat terdaftar" });
+  }
+
+  const account: ServiceAccount = JSON.parse(
+    Deno.env.get("FCM_SERVICE_ACCOUNT")!,
+  );
+  const token = await accessTokenFor(account);
+  const { title, body } = uninstallPinMessage(child.name ?? "Anak", pin.pin);
+
+  const results = await Promise.all(
+    devices.map((device) =>
+      fetch(
+        `https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            message: {
+              fid: device.token,
+              notification: { title, body },
+              data: {
+                type: "uninstallPin",
+                childId: String(child.id),
+                familyId: String(child.family_id),
+                route: "/orangtua",
+              },
+              android: {
+                priority: "high",
+                notification: {
+                  channel_id: "aura_alerts",
+                  // PIN tidak tampil di layar kunci HP orang tua.
+                  visibility: "PRIVATE",
+                },
+              },
+              apns: {
+                payload: {
+                  aps: { sound: "default", "interruption-level": "time-sensitive" },
+                },
+              },
+            },
+          }),
+        },
+      )
+    ),
+  );
+
+  const failed = results.filter((r) => !r.ok);
+  for (const result of failed) {
+    console.error(`AURA: FCM menolak PIN (${result.status}): ${await result.text()}`);
+  }
+  // Tanpa PIN di log.
+  console.log(`AURA: PIN hapus dikirim ke ${results.length - failed.length} perangkat.`);
+  return Response.json({ sent: results.length - failed.length });
+}
+
 Deno.serve(async (request) => {
   try {
     const payload = await request.json();
+    if (payload?.type === "uninstall_pin") {
+      return await sendUninstallPin(request);
+    }
     const alertId = payload?.record?.id;
 
     if (!alertId) {

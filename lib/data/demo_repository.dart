@@ -13,6 +13,7 @@ import '../domain/models/evidence_item.dart';
 import '../domain/models/guardian_message.dart';
 import '../domain/models/risk.dart';
 import '../domain/models/threat_alert.dart';
+import '../domain/models/uninstall_permission.dart';
 import '../domain/services/chain_of_custody.dart';
 import '../domain/services/threat_analyzer.dart';
 import 'aura_repository.dart';
@@ -379,6 +380,84 @@ class DemoRepository implements AuraRepository {
   /// Data demo selalu terbaru: tidak ada yang perlu diambil ulang.
   @override
   Future<void> refreshProfile() async {}
+
+  // PIN hapus AURA demo, di memori. Di Supabase PIN dibuat basis data.
+  final _pins = <String, UninstallPin>{};
+  final _pinsController = StreamController<List<UninstallPin>>.broadcast();
+
+  void _setPin(UninstallPin pin) {
+    _pins[pin.childId] = pin;
+    _pinsController.add(List.unmodifiable(_pins.values));
+  }
+
+  @override
+  Future<void> requestUninstallPin() async {
+    final user = _currentUser;
+    if (user == null) return;
+    _setPin(
+      UninstallPin(
+        childId: user.id,
+        pin: (Random().nextInt(900000) + 100000).toString(),
+        expiresAt: DateTime.now().add(UninstallPin.lifetime),
+      ),
+    );
+    _updateCurrentUser(user.copyWith(uninstallRequestedAt: DateTime.now()));
+  }
+
+  @override
+  Future<PinCheck> verifyUninstallPin(String pin) async {
+    final user = _currentUser;
+    final current = user == null ? null : _pins[user.id];
+    if (current == null || current.closedAt != null) return PinCheck.none;
+    if (!current.expiresAt.isAfter(DateTime.now())) return PinCheck.expired;
+    if (current.attempts >= UninstallPin.maxAttempts) return PinCheck.locked;
+    if (current.pin == pin.trim()) {
+      _setPin(_closed(current, 'used'));
+      return PinCheck.ok;
+    }
+    final attempts = current.attempts + 1;
+    _setPin(
+      UninstallPin(
+        childId: current.childId,
+        pin: current.pin,
+        expiresAt: current.expiresAt,
+        attempts: attempts,
+      ),
+    );
+    return attempts >= UninstallPin.maxAttempts
+        ? PinCheck.locked
+        : PinCheck.wrong;
+  }
+
+  @override
+  Stream<List<UninstallPin>> watchUninstallPins(String familyId) async* {
+    yield List.unmodifiable(_pins.values);
+    yield* _pinsController.stream;
+  }
+
+  @override
+  Future<void> cancelUninstallPin(String childId) async {
+    final current = _pins[childId];
+    if (current != null && current.closedAt == null) {
+      _setPin(_closed(current, 'cancelled'));
+    }
+  }
+
+  static UninstallPin _closed(UninstallPin pin, String by) => UninstallPin(
+    childId: pin.childId,
+    pin: pin.pin,
+    expiresAt: pin.expiresAt,
+    attempts: pin.attempts,
+    closedAt: DateTime.now(),
+    closedBy: by,
+  );
+
+  @override
+  Future<void> reportUninstallProtected(bool protected) async {
+    final user = _currentUser;
+    if (user == null) return;
+    _updateCurrentUser(user.copyWith(uninstallProtected: protected));
+  }
 
   @override
   Future<void> reportLockReady(bool ready) async {

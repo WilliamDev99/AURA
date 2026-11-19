@@ -6,11 +6,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/widgets.dart';
 
+import '../core/l10n/l10n.dart';
 import '../domain/models/app_user.dart';
 import '../domain/models/lock_schedule.dart';
 import '../domain/models/evidence_item.dart';
 import '../domain/models/guardian_message.dart';
 import '../domain/models/threat_alert.dart';
+import '../domain/models/uninstall_permission.dart';
 import '../domain/services/chain_of_custody.dart';
 import '../domain/services/threat_analyzer.dart';
 import 'aura_repository.dart';
@@ -432,6 +434,33 @@ class FirestoreRepository implements AuraRepository {
   /// ulang.
   @override
   Future<void> refreshProfile() async {}
+
+  // PIN hapus AURA harus dibuat dan diperiksa di server, di tempat yang tidak
+  // bisa dibaca HP anak. Itu ada di Supabase (patch_07), belum di Firestore.
+  static StateError _pinsNeedSupabase() =>
+      StateError(tr('PIN hapus AURA hanya tersedia dengan Supabase.'));
+
+  @override
+  Future<void> requestUninstallPin() async => throw _pinsNeedSupabase();
+
+  @override
+  Future<PinCheck> verifyUninstallPin(String pin) async =>
+      throw _pinsNeedSupabase();
+
+  @override
+  Stream<List<UninstallPin>> watchUninstallPins(String familyId) =>
+      Stream.value(const []);
+
+  @override
+  Future<void> cancelUninstallPin(String childId) async =>
+      throw _pinsNeedSupabase();
+
+  @override
+  Future<void> reportUninstallProtected(bool protected) async {
+    await _db.collection('users').doc(_requireUid()).set({
+      'uninstallProtected': protected,
+    }, SetOptions(merge: true));
+  }
 
   @override
   Future<void> reportLockReady(bool ready) async {

@@ -121,6 +121,18 @@ class MainActivity : FlutterActivity() {
                         openBatterySettings()
                         result.success(null)
                     }
+                    "uninstallProtection" -> result.success(AuraDeviceAdmin.isActive(this))
+                    "protectFromUninstall" -> {
+                        // Dialog admin perangkat ada di Pengaturan, yang terkunci
+                        // saat jam istirahat.
+                        ScreenLock.allowSettingsBriefly()
+                        runCatching { startActivity(AuraDeviceAdmin.activationIntent(this)) }
+                        result.success(null)
+                    }
+                    "uninstallAura" -> {
+                        uninstallAura()
+                        result.success(null)
+                    }
                     "testSosAlarm" -> {
                         SosAlarm.start(this, SosAlarmInfo.test())
                         result.success(true)
@@ -302,6 +314,29 @@ class MainActivity : FlutterActivity() {
                 startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
             }
         }
+    }
+
+    /**
+     * Orang tua sudah mengizinkan (diperiksa di Dart): lepas perlindungan
+     * hapus, tunggu Android selesai melepasnya, lalu buka dialog hapus AURA.
+     */
+    private fun uninstallAura() {
+        AuraDeviceAdmin.release(this)
+        val handler = android.os.Handler(mainLooper)
+        val startedAt = android.os.SystemClock.uptimeMillis()
+        fun openWhenReleased() {
+            val waited = android.os.SystemClock.uptimeMillis() - startedAt
+            if (AuraDeviceAdmin.isActive(this) && waited < 3_000) {
+                handler.postDelayed(::openWhenReleased, 150)
+                return
+            }
+            runCatching {
+                startActivity(
+                    Intent(Intent.ACTION_DELETE, android.net.Uri.fromParts("package", packageName, null)),
+                )
+            }
+        }
+        openWhenReleased()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

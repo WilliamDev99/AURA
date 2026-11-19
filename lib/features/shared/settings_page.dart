@@ -11,6 +11,7 @@ import '../../core/widgets/aura_widgets.dart';
 import '../../core/widgets/clay.dart';
 import '../child/widgets/chat_scan_status.dart';
 import '../child/widgets/lock_access_setup.dart';
+import '../child/widgets/uninstall_setup.dart';
 import '../../state/app_state.dart';
 import 'account_settings.dart';
 
@@ -139,6 +140,7 @@ class SettingsBody extends StatelessWidget {
                   },
                 ),
                 const LockAccessSetup(),
+                const UninstallSetup(),
               ],
               InfoRow(
                 label: tr('Peringatan terkirim'),

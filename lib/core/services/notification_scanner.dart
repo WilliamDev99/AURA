@@ -70,6 +70,13 @@ class NotificationScanner {
       await state.refreshProfile();
       return null;
     }
+    if (call.method == 'uninstallProtectionChanged') {
+      // Admin perangkat AURA baru saja dinyalakan atau dimatikan di
+      // Pengaturan Android; orang tua harus segera tahu.
+      await state.untilRestored();
+      await state.reportUninstallProtected(call.arguments == true);
+      return null;
+    }
     if (call.method != 'message') return null;
     final args = Map<String, Object?>.from(call.arguments as Map);
     await onMessage(

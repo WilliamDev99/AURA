@@ -78,6 +78,7 @@ object ScreenLock {
     private var overlay: View? = null
     private var lockedApp: String? = null
     private var foreground: String? = null
+    private var eventsReadUntil = 0L
     private var allowed: Set<String> = emptySet()
     private var allowedAt = 0L
     private var settingsApps: Set<String>? = null
@@ -307,16 +308,19 @@ object ScreenLock {
     private fun foregroundApp(context: Context): String? {
         val usage = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val end = System.currentTimeMillis()
-        // Pemeriksaan pertama melihat jauh ke belakang: anak mungkin sudah
-        // lama berada di satu aplikasi saat jam istirahat dimulai.
-        val since = if (foreground == null) 24 * 60 * 60 * 1000L else 15_000L
-        val events = usage.queryEvents(end - since, end)
+        // Semua perpindahan sejak pembacaan terakhir. Di luar jam istirahat
+        // (atau saat layar mati) tidak ada yang dibaca, jadi saat kunci mulai,
+        // aplikasi yang sudah lama terbuka tetap ketahuan dan langsung
+        // tertutup peringatan jam istirahat.
+        val since = LockSchedule.eventsSince(end, if (foreground == null) 0L else eventsReadUntil)
+        val events = usage.queryEvents(since, end)
         val event = UsageEvents.Event()
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
             // ACTIVITY_RESUMED (dulu MOVE_TO_FOREGROUND) bernilai 1.
             if (event.eventType == 1) foreground = event.packageName
         }
+        eventsReadUntil = end
         return foreground
     }
 

@@ -167,6 +167,8 @@ class _AuraAppState extends State<AuraApp> {
         _state.refreshChatScanStatus();
         // Izin jam istirahat bisa baru saja dinyalakan di Pengaturan.
         _state.refreshLockAccess();
+        // Perlindungan hapus bisa baru saja dinyalakan atau dimatikan.
+        _state.refreshUninstallProtection();
         _state.markActive();
         // Alarm SOS bisa dibunyikan atau dimatikan selagi AURA di belakang.
         if (widget.pushReady) PushService.instance.onResumed();

@@ -49,7 +49,9 @@ void main() {
   });
 
   group('di Android', () {
-    String read(String path) => File(path).readAsStringSync();
+    // Git di Windows bisa menulis berkas dengan CRLF.
+    String read(String path) =>
+        File(path).readAsStringSync().replaceAll('\r\n', '\n');
 
     test('pengunci memeriksa saat itu juga begitu jadwal baru tersimpan', () {
       final lock = read(

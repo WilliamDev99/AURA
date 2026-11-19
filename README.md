@@ -213,6 +213,31 @@ terkunci, supaya izin AURA tidak bisa dimatikan di malam hari.
   ([patch_06_lock_schedule.sql](supabase/patch_06_lock_schedule.sql)), bukan
   hanya di tampilan.
 
+### PIN orang tua untuk menghapus AURA
+
+Di HP anak, AURA bisa dilindungi sebagai admin perangkat (**Pengaturan →
+Perlindungan hapus → Aktifkan**). Selama aktif, Android menolak menghapus
+AURA, baik dari layar utama maupun dari Pengaturan. AURA tidak memakai
+kewenangan admin lain: tidak mengunci layar, tidak menghapus data, tidak
+mengatur kata sandi ([aura_device_admin.xml](android/app/src/main/res/xml/aura_device_admin.xml)).
+
+- Anak menekan **Pengaturan → Hapus AURA → Minta PIN**. PIN 6 angka dibuat di
+  basis data dan hanya bisa dibaca orang tua
+  ([patch_07_uninstall_permission.sql](supabase/patch_07_uninstall_permission.sql)):
+  muncul di notifikasi HP orang tua (Edge Function `notify-parents`, tidak
+  tampil di layar kunci) dan di kartu "Hapus AURA" di aplikasi orang tua.
+  HP anak tidak pernah menerima PIN-nya.
+- Orang tua yang mengizinkan memberikan PIN itu ke anak; yang tidak
+  mengizinkan menekan **Batalkan PIN**.
+- Anak memasukkan PIN; basis data yang memeriksanya. PIN berlaku 30 menit,
+  sekali pakai, dan terkunci setelah 5 kali salah. Bila benar, AURA melepas
+  perlindungannya dan membuka dialog hapus aplikasi
+  ([AuraDeviceAdmin.kt](android/app/src/main/kotlin/id/aura/aura/AuraDeviceAdmin.kt)).
+- Tanpa reset pabrik, aplikasi biasa tidak bisa melarang anak mematikan
+  admin perangkat lewat Pengaturan Android. Yang AURA lakukan: Android
+  menampilkan peringatan dari AURA, Pengaturan terkunci selama jam istirahat,
+  dan orang tua langsung melihat "Perlindungan hapus mati".
+
 ### Pemindaian chat masuk
 
 Di ponsel anak, `AuraNotificationListener`
@@ -354,9 +379,11 @@ demo, yang terlihat di log sebagai
    [patch_04_profile_photo.sql](supabase/patch_04_profile_photo.sql) (foto
    profil di bucket privat, dan penjagaan profil yang lebih ketat),
    [patch_05_fix_avatar_read.sql](supabase/patch_05_fix_avatar_read.sql)
-   (perbaikan aturan baca foto untuk yang sudah menjalankan patch 04), dan
+   (perbaikan aturan baca foto untuk yang sudah menjalankan patch 04),
    [patch_06_lock_schedule.sql](supabase/patch_06_lock_schedule.sql) (jam
-   istirahat).
+   istirahat), dan
+   [patch_07_uninstall_permission.sql](supabase/patch_07_uninstall_permission.sql)
+   (PIN orang tua untuk menghapus AURA).
 3. Buka **Authentication → Providers → Anonymous**, nyalakan. Ini untuk
    ponsel anak, yang ditautkan lewat kode keluarga.
 4. Buka **Project Settings → API**, salin *Project URL* dan *Publishable key*
@@ -517,8 +544,8 @@ minimal 1024 piksel; gambar sekarang 540 × 540.
 ## Pengujian
 
 ```bash
-flutter test          # 524 test
-cd android && ./gradlew :app:testDebugUnitTest   # 17 test Kotlin (saringan kanal, judul notifikasi, ID SOS, jam istirahat)
+flutter test          # 539 test
+cd android && ./gradlew :app:testDebugUnitTest   # 18 test Kotlin (saringan kanal, judul notifikasi, ID SOS, jam istirahat)
 cd functions && npm run build
 ```
 

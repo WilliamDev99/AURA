@@ -27,6 +27,9 @@
          belakang. Tanpanya, HP seperti Realme dan OPPO mematikan AURA saat
          daftar aplikasi terbaru dibersihkan, dan kuncinya ikut berhenti. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Setelah orang tua mengizinkan, AURA membuka dialog hapus dirinya
+         sendiri (lihat AuraDeviceAdmin.kt). -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
     <!-- Tombol SOS tidak menelepon dan tidak mengirim SMS: ia membunyikan
          alarm di HP orang tua lewat internet. Bila gagal terkirim, aplikasi
@@ -118,6 +121,21 @@
             android:permission="com.google.android.c2dm.permission.SEND">
             <intent-filter>
                 <action android:name="com.google.android.c2dm.intent.RECEIVE" />
+            </intent-filter>
+        </receiver>
+        <!-- Perlindungan hapus di HP anak: selama aktif sebagai admin perangkat,
+             AURA tidak bisa dihapus tanpa izin orang tua. Tanpa kewenangan
+             admin lain (res/xml/aura_device_admin.xml). -->
+        <receiver
+            android:name=".AuraDeviceAdmin"
+            android:exported="true"
+            android:label="AURA"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/aura_device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
             </intent-filter>
         </receiver>
         <!-- Penjaga cadangan jam istirahat (lihat LockWatchdog.kt): menghidupkan

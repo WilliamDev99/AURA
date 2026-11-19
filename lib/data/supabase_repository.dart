@@ -17,6 +17,7 @@ import '../domain/models/guardian_message.dart';
 import '../domain/models/lock_schedule.dart';
 import '../domain/models/risk.dart';
 import '../domain/models/threat_alert.dart';
+import '../domain/models/uninstall_permission.dart';
 import '../domain/services/chain_of_custody.dart';
 import '../domain/services/threat_analyzer.dart';
 import '../supabase_options.dart';
@@ -1033,6 +1034,79 @@ class SupabaseRepository implements AuraRepository {
   }
 
   @override
+  Future<void> requestUninstallPin() async {
+    // PIN dibuat di basis data (patch_07); yang kembali hanya waktu
+    // kedaluwarsanya.
+    await _pinCall(() => _db.rpc('request_uninstall_pin'));
+    // Notifikasi berisi PIN ke HP orang tua. Bila gagal (mis. fungsinya
+    // belum diperbarui), PIN tetap terlihat di aplikasi orang tua.
+    try {
+      await _db.functions.invoke(
+        'notify-parents',
+        body: {'type': 'uninstall_pin'},
+      );
+    } catch (error) {
+      debugPrint('AURA: notifikasi PIN belum terkirim (${error.runtimeType}).');
+    }
+  }
+
+  @override
+  Future<PinCheck> verifyUninstallPin(String pin) async => PinCheck.fromName(
+    await _pinCall(
+      () => _db.rpc('verify_uninstall_pin', params: {'entered': pin.trim()}),
+    ),
+  );
+
+  @override
+  Stream<List<UninstallPin>> watchUninstallPins(String familyId) =>
+      resilientStream(
+        () => _db
+            .from('uninstall_pins')
+            .stream(primaryKey: ['child_id'])
+            .eq('family_id', familyId),
+      ).map(
+        (rows) =>
+            rows.map(UninstallPin.fromRow).whereType<UninstallPin>().toList(),
+      );
+
+  @override
+  Future<void> cancelUninstallPin(String childId) => _pinCall(
+    () => _db.rpc('cancel_uninstall_pin', params: {'child': childId}),
+  );
+
+  /// Pesan dari fungsi PIN di basis data sudah ditulis untuk pengguna
+  /// ("Tunggu sebentar sebelum meminta PIN lagi."): diteruskan apa adanya.
+  Future<T> _pinCall<T>(Future<T> Function() call) async {
+    try {
+      return await call();
+    } on PostgrestException catch (error) {
+      if (error.code == 'PGRST202' ||
+          error.message.contains('Could not find')) {
+        throw StateError(
+          tr(
+            'Fitur PIN belum dipasang di server. Jalankan '
+            'supabase/patch_07_uninstall_permission.sql di SQL Editor '
+            'Supabase.',
+          ),
+        );
+      }
+      if (error.code == '23514' || error.code == '42501') {
+        throw StateError(error.message);
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> reportUninstallProtected(bool protected) async {
+    final uid = _requireUid();
+    await _db
+        .from('profiles')
+        .update({'uninstall_protected': protected})
+        .eq('id', uid);
+  }
+
+  @override
   Future<void> reportChatScan(bool enabled) async {
     final uid = _requireUid();
     await _db
@@ -1097,6 +1171,8 @@ class SupabaseRepository implements AuraRepository {
     avatarPath: row['avatar_path'] as String?,
     lockSchedule: LockSchedule.fromJson(row['lock_schedule']),
     lockReady: row['lock_ready'] as bool?,
+    uninstallProtected: row['uninstall_protected'] as bool?,
+    uninstallRequestedAt: _parseDate(row['uninstall_requested_at']),
   );
 
   ThreatAlert _alertFromRow(Map<String, dynamic> row) => ThreatAlert(

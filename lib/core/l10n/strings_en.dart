@@ -306,4 +306,51 @@ const englishStrings = <String, String>{
       'counts as Monday.',
   'Menyimpan...': 'Saving...',
   'Belum tersimpan. {error}': 'Not saved. {error}',
+
+  // ------------------------------------------------ PIN hapus AURA
+  'Hapus AURA': 'Remove AURA',
+  'Batalkan PIN': 'Cancel PIN',
+  '{childName} minta izin menghapus AURA. Kalau Anda mengizinkan, berikan '
+          'PIN ini ke {childName}:':
+      '{childName} is asking to remove AURA. If you allow it, give '
+      '{childName} this PIN:',
+  'Berlaku sampai pukul {time}, sekali pakai.':
+      'Valid until {time}, single use.',
+  'Terlindung: {childName} tidak bisa menghapus AURA tanpa PIN dari Anda.':
+      "Protected: {childName} can't remove AURA without a PIN from you.",
+  'Perlindungan hapus mati.': 'Removal protection is off.',
+  '{childName} bisa menghapus AURA tanpa izin. Di HP {childName}: AURA > '
+          'Pengaturan > Perlindungan hapus > Aktifkan.':
+      "{childName} can remove AURA without permission. On {childName}'s "
+      'phone: AURA > Settings > Removal protection > Turn on.',
+  'Menunggu HP {childName} membuka AURA untuk memeriksa perlindungannya.':
+      "Waiting for {childName}'s phone to open AURA and check its "
+      'protection.',
+  'Perlindungan hapus': 'Removal protection',
+  'Belum aktif. AURA bisa terhapus tanpa izin orang tuamu.':
+      "Off. AURA can be removed without your parent's permission.",
+  'Aktifkan': 'Turn on',
+  'Butuh PIN dari orang tuamu.': 'Needs a PIN from your parent.',
+  'PIN dari orang tua': "Parent's PIN",
+  'Minta PIN': 'Ask for a PIN',
+  'Minta PIN baru': 'Ask for a new PIN',
+  'PIN dikirim ke HP orang tuamu. Kalau orang tuamu mengizinkan, minta '
+          'PIN-nya lalu masukkan di sini.':
+      "The PIN was sent to your parent's phone. If your parent agrees, ask "
+      'them for it and enter it here.',
+  'PIN benar. Ikuti dialog untuk menghapus AURA.':
+      'Correct PIN. Follow the dialog to remove AURA.',
+  'PIN salah. Coba lagi.': 'Wrong PIN. Try again.',
+  'Terlalu sering salah. Minta PIN baru.':
+      'Too many wrong tries. Ask for a new PIN.',
+  'PIN sudah kedaluwarsa. Minta PIN baru.':
+      'The PIN expired. Ask for a new one.',
+  'Belum ada PIN yang berlaku. Tekan Minta PIN.':
+      'No valid PIN yet. Tap Ask for a PIN.',
+  'Fitur PIN belum dipasang di server. Jalankan '
+          'supabase/patch_07_uninstall_permission.sql di SQL Editor Supabase.':
+      'The PIN feature is not set up on the server yet. Run '
+      'supabase/patch_07_uninstall_permission.sql in the Supabase SQL Editor.',
+  'PIN hapus AURA hanya tersedia dengan Supabase.':
+      'The AURA removal PIN is only available with Supabase.',
 };

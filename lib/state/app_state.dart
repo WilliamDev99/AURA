@@ -13,6 +13,7 @@ import '../domain/models/guardian_message.dart';
 import '../domain/models/lock_schedule.dart';
 import '../domain/models/risk.dart';
 import '../domain/models/threat_alert.dart';
+import '../domain/models/uninstall_permission.dart';
 import '../domain/services/chain_of_custody.dart';
 import '../domain/services/emergency_call_service.dart';
 import '../domain/services/guardian_brain.dart';
@@ -20,6 +21,7 @@ import '../domain/services/location_service.dart';
 import '../domain/services/notification_access.dart';
 import '../domain/services/screen_lock_access.dart';
 import '../domain/services/threat_analyzer.dart';
+import '../domain/services/uninstall_guard.dart';
 import '../core/l10n/l10n.dart';
 
 /// Hasil satu kali pemindaian yang dikembalikan ke UI anak.
@@ -42,6 +44,7 @@ class AppState extends ChangeNotifier {
     this.callService = const EmergencyCallService(),
     this.notificationAccess = const NotificationAccess(),
     this.lockAccess = const ScreenLockAccess(),
+    this.uninstallGuard = const UninstallGuard(),
     this.aiChat = aiChatEnabled,
   }) {
     _userSub = repository.watchCurrentUser().listen(
@@ -69,6 +72,9 @@ class AppState extends ChangeNotifier {
   /// Izin untuk mengunci aplikasi pada jam istirahat di ponsel anak.
   final ScreenLockAccess lockAccess;
 
+  /// Perlindungan AURA dari penghapusan di ponsel anak.
+  final UninstallGuard uninstallGuard;
+
   /// Status izin jam istirahat di ponsel ini; null bila belum/tidak bisa
   /// diperiksa.
   LockAccess? _lockAccessStatus;
@@ -86,6 +92,7 @@ class AppState extends ChangeNotifier {
   StreamSubscription<List<ThreatAlert>>? _alertSub;
   StreamSubscription<List<EvidenceItem>>? _evidenceSub;
   StreamSubscription<List<AppUser>>? _childrenSub;
+  StreamSubscription<List<UninstallPin>>? _pinSub;
   StreamSubscription<List<GuardianMessage>>? _chatSub;
 
   /// Dijalankan tepat sebelum sesi berakhir, selagi pengguna masih berwenang
@@ -381,6 +388,77 @@ class AppState extends ChangeNotifier {
   /// Orang tua mengatur jam istirahat anak.
   Future<void> setLockSchedule(String childId, LockSchedule schedule) =>
       _guard(() => repository.setLockSchedule(childId, schedule));
+
+  // ------------------------------------------------- PIN hapus AURA
+
+  List<UninstallPin> _uninstallPins = const [];
+
+  /// HP orang tua: PIN hapus AURA milik anak ini yang masih bisa dipakai.
+  UninstallPin? uninstallPinFor(String childId) {
+    final now = DateTime.now();
+    return _uninstallPins
+        .where((pin) => pin.childId == childId && pin.activeAt(now))
+        .firstOrNull;
+  }
+
+  /// HP anak: meminta PIN. PIN-nya hanya dikirim ke orang tua.
+  Future<void> requestUninstallPin() =>
+      _guard(() => repository.requestUninstallPin());
+
+  /// HP anak: memasukkan PIN dari orang tua. Bila benar, AURA melepas
+  /// perlindungannya dan membuka dialog hapus aplikasi. Null bila gagal
+  /// menghubungi server (lihat [lastError]).
+  Future<PinCheck?> enterUninstallPin(String pin) async {
+    _lastError = null;
+    _busy = true;
+    notifyListeners();
+    try {
+      final check = await repository.verifyUninstallPin(pin);
+      if (check == PinCheck.ok) await uninstallGuard.uninstall();
+      return check;
+    } catch (error) {
+      _lastError = humanizeError(error);
+      return null;
+    } finally {
+      _busy = false;
+      notifyListeners();
+    }
+  }
+
+  /// HP orang tua: membatalkan PIN yang belum dipakai (tidak mengizinkan).
+  Future<void> cancelUninstallPin(String childId) =>
+      _guard(() => repository.cancelUninstallPin(childId));
+
+  /// HP anak: menyalakan perlindungan (dialog admin perangkat Android).
+  Future<void> protectFromUninstall() => uninstallGuard.protect();
+
+  /// HP anak memeriksa perlindungan hapus dan melaporkannya bila berubah,
+  /// supaya orang tua tahu AURA benar-benar tidak bisa dihapus diam-diam.
+  Future<void> refreshUninstallProtection() async {
+    final user = _user;
+    if (user == null || !user.isChild) return;
+    final protected = await uninstallGuard.isProtected();
+    if (protected == null) return;
+    await reportUninstallProtected(protected);
+  }
+
+  /// Dari Android saat perlindungan baru saja dinyalakan atau dimatikan,
+  /// juga saat AURA berjalan tanpa layar.
+  Future<void> reportUninstallProtected(bool protected) async {
+    final user = _user;
+    if (user == null || !user.isChild) return;
+    if (user.uninstallProtected == protected) return;
+    try {
+      await repository.reportUninstallProtected(protected);
+      final current = _user;
+      if (current != null && current.id == user.id) {
+        _user = current.copyWith(uninstallProtected: protected);
+        notifyListeners();
+      }
+    } catch (error) {
+      debugPrint('AURA: status perlindungan hapus belum terkirim ($error).');
+    }
+  }
 
   /// Tempat HP anak menyimpan jam istirahatnya, dibaca ScreenLock.kt sebagai
   /// `flutter.aura.lock_schedule`. Disimpan di HP, jadi penguncinya tetap
@@ -744,6 +822,8 @@ class AppState extends ChangeNotifier {
       _alertSub?.cancel();
       _evidenceSub?.cancel();
       _childrenSub?.cancel();
+      _pinSub?.cancel();
+      _uninstallPins = const [];
       _chatSub?.cancel();
       _alertsLoaded = false;
       notifyListeners();
@@ -756,6 +836,7 @@ class AppState extends ChangeNotifier {
       _lastMarkedActive = null;
       unawaited(refreshChatScanStatus());
       unawaited(refreshLockAccess());
+      unawaited(refreshUninstallProtection());
       unawaited(markActive());
     }
 
@@ -780,6 +861,16 @@ class AppState extends ChangeNotifier {
         _children = children;
         notifyListeners();
       }, onError: _onStreamError);
+
+      // PIN hapus AURA hanya untuk mata orang tua.
+      _pinSub?.cancel();
+      _uninstallPins = const [];
+      if (!user.isChild) {
+        _pinSub = repository.watchUninstallPins(familyId).listen((pins) {
+          _uninstallPins = pins;
+          notifyListeners();
+        }, onError: _onStreamError);
+      }
     }
 
     if (user.isChild && user.familyId != null) {
@@ -881,6 +972,7 @@ class AppState extends ChangeNotifier {
     _alertSub?.cancel();
     _evidenceSub?.cancel();
     _childrenSub?.cancel();
+    _pinSub?.cancel();
     _chatSub?.cancel();
     super.dispose();
   }

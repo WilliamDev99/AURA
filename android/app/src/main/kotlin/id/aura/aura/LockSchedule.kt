@@ -52,6 +52,26 @@ data class LockSchedule(
          */
         fun delayToNextMinute(nowMillis: Long): Long = 60_000 - nowMillis % 60_000 + 200
 
+        private const val DAY_MS = 24 * 60 * 60 * 1000L
+        private const val OVERLAP_MS = 15_000L
+
+        /**
+         * Sejak kapan catatan perpindahan aplikasi dibaca untuk tahu aplikasi
+         * yang sedang terbuka: sejak pembacaan terakhir ([readUntil], 0 bila
+         * belum pernah), dengan tumpang tindih 15 detik, paling jauh sehari.
+         *
+         * Jam istirahat sering mulai saat anak sudah lama di satu aplikasi.
+         * Membaca 15 detik terakhir saja tidak menemukan apa-apa, sehingga
+         * yang dipakai catatan lama (mis. layar utama dari jam istirahat
+         * kemarin) dan kunci baru muncul setelah anak pindah aplikasi.
+         */
+        fun eventsSince(nowMillis: Long, readUntil: Long): Long =
+            if (readUntil <= 0) {
+                nowMillis - DAY_MS
+            } else {
+                maxOf(nowMillis - DAY_MS, minOf(readUntil, nowMillis) - OVERLAP_MS)
+            }
+
         /** Bentuk yang ditulis Dart: {"enabled":true,"start":"22:00",...}. */
         fun parse(json: String?): LockSchedule? {
             if (json.isNullOrBlank()) return null

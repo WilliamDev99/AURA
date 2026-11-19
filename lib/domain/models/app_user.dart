@@ -22,6 +22,8 @@ class AppUser {
     this.avatarPath,
     this.lockSchedule,
     this.lockReady,
+    this.uninstallProtected,
+    this.uninstallRequestedAt,
   });
 
   final String id;
@@ -58,6 +60,13 @@ class AppUser {
   /// diberikan. Null bila belum pernah dilaporkan.
   final bool? lockReady;
 
+  /// Dilaporkan ponsel anak: AURA aktif sebagai admin perangkat, sehingga
+  /// tidak bisa dihapus tanpa izin orang tua. Null bila belum dilaporkan.
+  final bool? uninstallProtected;
+
+  /// Kapan anak terakhir meminta PIN untuk menghapus AURA.
+  final DateTime? uninstallRequestedAt;
+
   bool get hasConsented => monitoringConsentAt != null;
   bool get isChild => role == UserRole.child;
 
@@ -76,6 +85,8 @@ class AppUser {
     bool removeAvatar = false,
     LockSchedule? lockSchedule,
     bool? lockReady,
+    bool? uninstallProtected,
+    DateTime? uninstallRequestedAt,
   }) {
     return AppUser(
       id: id,
@@ -94,6 +105,8 @@ class AppUser {
       avatarPath: removeAvatar ? null : avatarPath ?? this.avatarPath,
       lockSchedule: lockSchedule ?? this.lockSchedule,
       lockReady: lockReady ?? this.lockReady,
+      uninstallProtected: uninstallProtected ?? this.uninstallProtected,
+      uninstallRequestedAt: uninstallRequestedAt ?? this.uninstallRequestedAt,
     );
   }
 
@@ -114,6 +127,8 @@ class AppUser {
     'avatarPath': avatarPath,
     'lockSchedule': lockSchedule?.toJson(),
     'lockReady': lockReady,
+    'uninstallProtected': uninstallProtected,
+    'uninstallRequestedAt': uninstallRequestedAt?.toUtc().toIso8601String(),
   };
 
   factory AppUser.fromMap(Map<String, dynamic> map) => AppUser(
@@ -133,6 +148,8 @@ class AppUser {
     avatarPath: map['avatarPath'] as String?,
     lockSchedule: LockSchedule.fromJson(map['lockSchedule']),
     lockReady: map['lockReady'] as bool?,
+    uninstallProtected: map['uninstallProtected'] as bool?,
+    uninstallRequestedAt: _date(map['uninstallRequestedAt']),
   );
 
   static DateTime? _date(Object? value) =>
